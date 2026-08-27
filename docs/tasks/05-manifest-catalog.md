@@ -1,6 +1,6 @@
 # T05：可选 Manifest 与 Catalog 合并
 
-- 状态：Pending
+- 状态：Completed
 - 阶段：Rust 核心
 - 依赖：T02、T04
 - 阻塞：T12、T13
@@ -35,4 +35,3 @@ fixture 自动发现结果可以与内置/用户清单合并为确定快照；�
 
 - 不提供 UI 编辑器。
 - 不把 catalog 做成远端服务。
-

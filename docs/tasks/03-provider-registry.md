@@ -1,6 +1,6 @@
 # T03：Provider 接口与注册表
 
-- 状态：Pending
+- 状态：Completed
 - 阶段：Rust 核心
 - 依赖：T02
 - 阻塞：T09、T10、T11、T13、T23–T26
@@ -32,4 +32,3 @@
 ## 非目标
 
 - 不实现任何真实 Provider。
-
