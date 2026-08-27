@@ -1,0 +1,91 @@
+# dbox 任务索引
+
+本目录把 [开发计划](../development-plan.md) 拆成可独立实现、测试和验收的任务。每个任务只对应一个文件；实现完成时在该文件中更新状态并记录测试证据。
+
+## 执行原则
+
+1. **Rust 后端优先。** T01–T16 完成前，不开始正式图形界面 T17–T19。
+2. **测试属于任务本身。** 每个 Rust 任务必须同时提交对应单元/fixture/集成测试，不创建“以后统一补测试”的尾部任务。
+3. **不操作真实全局包。** 自动化测试只能使用临时目录、FakeProvider 和 fake binaries，禁止调用真实 `brew upgrade`、`npm install -g`、`rustup update` 或 `npx skills`。
+4. **一项一验收。** 依赖任务未完成时，不通过临时硬编码绕过它。
+5. **后端门禁。** T16 是前端开工条件；Rust 格式化、Clippy、测试和集成场景全部通过后才解锁 UI。
+6. **Provider 优先于白名单。** npm/brew 的全部全局安装项均由 Provider 自动生成 Tool；catalog 只做特殊增强。
+7. **Skill 不自研。** Skill 管理只通过 `npx skills`，dbox 不读写其目录和 lock 文件。
+
+## 状态值
+
+- `Pending`：依赖满足后可开始。
+- `In Progress`：正在实现，同一时间尽量只保留一个核心任务。
+- `Blocked`：依赖或已记录问题阻塞。
+- `Completed`：交付物、测试和完成标准全部满足，并已记录验证证据。
+- `Future`：MVP 后候选任务。
+
+## Rust 后端主线
+
+| ID | 任务 | 依赖 | 主要验收 |
+| --- | --- | --- | --- |
+| T01 | [项目重命名与 Rust 测试基线](01-project-baseline.md) | 无 | fmt/clippy/test/build 基线通过 |
+| T02 | [核心领域模型](02-domain-model.md) | T01 | 来源限定 ID、多 executable、serde 测试 |
+| T03 | [Provider 接口与注册表](03-provider-registry.md) | T02 | FakeProvider 与 capability 测试 |
+| T04 | [版本比较与状态汇总](04-version-and-status.md) | T02 | SemVer/unknown/partial 纯单测 |
+| T05 | [可选 Manifest 与 Catalog 合并](05-manifest-catalog.md) | T02、T04 | 无 manifest 仍可管理，覆盖合并测试 |
+| T06 | [设置、缓存与运行记录持久化](06-persistence.md) | T01、T02 | 临时目录、原子写入、revision 测试 |
+| T07 | [安全命令规格与 UpdatePlan](07-command-plan.md) | T02、T04 | argv 隔离、hash、过期计划测试 |
+| T08 | [命令执行器、日志、超时与取消](08-command-executor.md) | T06、T07 | fake process 集成测试 |
+| T09 | [GUI 环境与可执行文件解析](09-environment-resolver.md) | T03、T07 | fake PATH/候选路径测试 |
+| T10 | [npm Global Provider](10-npm-global-provider.md) | T03、T04、T07–T09 | 全部 global package fixture |
+| T11 | [Homebrew Provider](11-homebrew-provider.md) | T03、T04、T07–T09 | 全部 formula/cask fixture |
+| T12 | [Catalog 增强与 Pi 示例](12-catalog-enrichment-pi.md) | T05、T10、T11 | 通用 Tool + 多组件增强测试 |
+| T13 | [刷新、检查与更新应用服务](13-application-service.md) | T03–T12 | 纯 Rust 完整用例测试 |
+| T14 | [批量队列、运行历史与恢复](14-run-queue-history.md) | T06、T08、T13 | 20 项、部分失败、中断恢复测试 |
+| T15 | [Tauri 后端 API 与事件边界](15-tauri-backend-api.md) | T09、T13、T14 | DTO/command/event 契约测试 |
+| T16 | [Rust 后端集成验收门](16-backend-acceptance-gate.md) | T01–T15 | 所有后端门禁与端到端 fixture 通过 |
+
+## 图形界面与发布
+
+以下任务只有在 T16 标记 `Completed` 后才能开始：
+
+| ID | 任务 | 依赖 | 主要验收 |
+| --- | --- | --- | --- |
+| T17 | [前端壳层与类型化 API](17-frontend-foundation.md) | T16 | mock transport 与 DTO 对接 |
+| T18 | [工具列表、详情与刷新界面](18-tools-ui.md) | T17 | 全量 Tool 状态展示 |
+| T19 | [更新确认、运行记录与设置界面](19-update-runs-settings-ui.md) | T14、T17、T18 | UpdatePlan 驱动完整 UI 流程 |
+| T20 | [MVP 打包、文档与发布验收](20-mvp-release.md) | T16、T18、T19 | macOS 包和验收报告 |
+
+## 后续能力
+
+| ID | 任务 | 依赖 | 说明 |
+| --- | --- | --- | --- |
+| T21 | [`npx skills` 后端薄适配](21-skills-cli-backend.md) | T08、T09、T15、T16 | 不实现 Skill 文件管理 |
+| T22 | [Skill 管理界面](22-skills-ui.md) | T17、T21 | 只操作 `npx skills` 后端 |
+| T23 | [mise Provider](23-mise-provider.md) | Backend Gate | 多版本与全局 scope |
+| T24 | [rustup Provider](24-rustup-provider.md) | Backend Gate | toolchain/component/target 层级 |
+| T25 | [Cargo Install Provider](25-cargo-install-provider.md) | Backend Gate | 用户级 binary crates |
+| T26 | [Direct/Self-update Provider](26-direct-provider.md) | Backend Gate | Deno/Bun/Flutter 等明确来源 |
+
+## 推荐执行顺序
+
+主线顺序：
+
+```text
+T01 → T02 → T03/T04/T06 → T05/T07 → T08/T09
+    → T10/T11 → T12 → T13 → T14 → T15 → T16
+    → T17 → T18 → T19 → T20
+```
+
+斜杠只表示依赖允许并行，不要求并行开发。后续 T21–T26 在 MVP 稳定后按优先级进入。
+
+## 每项完成时的记录格式
+
+在任务文件末尾追加：
+
+```text
+## 验证记录
+
+- 完成日期：YYYY-MM-DD
+- 关键文件：
+- 执行命令：
+- 测试结果：
+- 已知限制：
+```
+
