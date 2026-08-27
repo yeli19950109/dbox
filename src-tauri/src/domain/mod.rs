@@ -7,7 +7,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use crate::version::{aggregate_component_statuses, ComponentStatus, ToolStatus, VersionValue};
+use crate::version::{
+    aggregate_component_statuses, ComponentStatus, ToolStatus, VerificationStatus, VersionValue,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("{kind} must be non-empty, trimmed, and contain no control characters")]
@@ -349,6 +351,18 @@ impl RunStatus {
             })
         }
     }
+
+    pub const fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Succeeded
+                | Self::Failed
+                | Self::Cancelled
+                | Self::TimedOut
+                | Self::Interrupted
+                | Self::Partial
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -368,6 +382,23 @@ pub struct Run {
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub batch_id: Option<String>,
+    #[serde(default)]
+    pub retry_of: Option<RunId>,
+    #[serde(default)]
+    pub log_path: Option<PathBuf>,
+    #[serde(default)]
+    pub summary: Option<RunSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunSummary {
+    pub exit_code: Option<i32>,
+    pub output_tail: String,
+    pub verification: Option<VerificationStatus>,
+    pub error: Option<String>,
 }
 
 #[cfg(test)]

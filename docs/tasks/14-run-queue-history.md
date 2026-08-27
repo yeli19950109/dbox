@@ -1,6 +1,6 @@
 # T14：批量队列、运行历史与恢复
 
-- 状态：Pending
+- 状态：Completed
 - 阶段：Rust 应用层
 - 依赖：T06、T08、T13
 - 阻塞：T15、T16、T19
@@ -35,3 +35,10 @@
 
 - MVP 不并行执行 npm/brew 更新。
 
+## 验证记录
+
+- 完成日期：2026-08-27
+- 关键文件：`src-tauri/src/application/run_queue.rs`、`src-tauri/src/domain/mod.rs`、`src-tauri/tests/run_queue_history.rs`、`src-tauri/tests/fixtures/fake-queue-command.sh`
+- 执行命令：`cargo fmt --check`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test`
+- 测试结果：20 项压力 fixture 串行且顺序确定；覆盖失败后继续、批量 Partial 汇总、queued/running 取消、进程树清理、同 Tool 互斥、重启 interrupted、历史重建、日志引用和 retry RunId 关联。
+- 已知限制：MVP 只接受并发度 1 的调度策略；Provider 互斥组和并行策略接口已保留，正式启用由后续任务完成。

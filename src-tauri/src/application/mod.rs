@@ -1,3 +1,7 @@
+mod run_queue;
+
+pub use run_queue::*;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -11,8 +15,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::catalog::{Catalog, CatalogDiagnostic, CatalogError};
 use crate::domain::{
-    ComponentId, Installation, InstallationId, ProviderId, Run, RunId, RunStatus, StrategyId,
-    StrategyKind, Tool, ToolId,
+    ComponentId, Installation, InstallationId, ProviderId, Run, RunId, RunStatus, RunSummary,
+    StrategyId, StrategyKind, Tool, ToolId,
 };
 use crate::environment::{executable_fingerprint, EnvironmentResolver, ResolveRequest};
 use crate::executor::{
@@ -719,6 +723,20 @@ impl ApplicationService {
             created_at: execution.started_at,
             started_at: Some(execution.started_at),
             finished_at: Some(execution.finished_at),
+            batch_id: None,
+            retry_of: None,
+            log_path: Some(
+                self.store
+                    .paths()
+                    .runs_dir()
+                    .join(format!("{}.jsonl", execution.run_id)),
+            ),
+            summary: Some(RunSummary {
+                exit_code: execution.exit_code,
+                output_tail: execution.output_tail.clone(),
+                verification: execution.verification.clone(),
+                error: None,
+            }),
         };
 
         let mut state = self.state.write().await;
