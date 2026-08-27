@@ -1,6 +1,6 @@
 # T18：工具列表、详情与刷新界面
 
-- 状态：Blocked until T16
+- 状态：Completed
 - 阶段：图形界面
 - 依赖：T17
 - 阻塞：T19、T20
@@ -31,3 +31,12 @@
 ## 完成标准
 
 用户可以浏览全部 npm/brew 安装项并理解其来源与状态；所有写操作仍未通过此页面直接执行；没有项目自研 virtualizer、通用 throttle/debounce 或 accessibility runner。
+
+## 验证记录
+
+- 完成日期：2026-08-27
+- 关键文件：`src/views/ToolsView.vue`、`src/components/ToolCard.vue`、`src/utils/presentation.ts`、`src/styles.css`、对应 `*.test.ts`
+- 执行命令：`npm test -- src/views/ToolsView.test.ts --reporter=verbose`、`npm test`、`npm run build`
+- 测试结果：覆盖空列表、500 项、未知工具、跨 Provider 重名、部分失败、筛选、隐藏项、刷新去重、键盘焦点、可访问名称与 axe-core color-contrast 规则；500 项普通列表为 102.3 ms/500 个卡片，TanStack Virtual 为 29.5 ms/8 个卡片（本机 jsdom 单次基准），因此采用虚拟列表。
+- 实现约束：来源限定 Tool 不合并；catalog 未收录项使用通用样式；unknown/unsupported 不显示为“已是最新”；搜索 debounce 使用 VueUse。
+- 已知限制：卡片只摘要前两个 Component，完整 Component、策略、安装路径和 executable 在详情面板显示。

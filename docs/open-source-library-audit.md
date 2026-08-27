@@ -52,8 +52,8 @@
 | --- | --- | --- | --- |
 | P0 | T06 | 选定并集成精确版本 `atomic-write-file`；补充 discard、覆盖、权限和 commit 失败测试 | 平台 CI 持续验证非 Unix 行为 |
 | P0 | T15/T17 | 完成 `tauri-specta` command/event spike 并接受 [ADR 0002](adr/0002-rust-typescript-contract-generation.md)；任务禁止镜像 DTO | T15 实现时加入锁定依赖和生成命令 |
-| P1 | T17 | 任务已明确 Vue Router、Pinia、Vitest、Vue Test Utils | T16 完成后实施 |
-| P1 | T18/T19 | 任务已明确 `@tanstack/vue-virtual`、VueUse、`axe-core` 与性能例外条件 | T17/T18 实施时加入依赖和基准 |
+| P1 | T17 | 已实现 Vue Router、Pinia、Vitest、Vue Test Utils，并锁定精确版本 | 完成 |
+| P1 | T18/T19 | 已实现 `@tanstack/vue-virtual`、VueUse、`axe-core` 并保存 500 项/大日志测试证据 | 完成 |
 | P1 | T20 | 任务已限制为 Tauri CLI/bundler/updater 与官方 CI/action | 发布阶段实施 |
 | P1 | T16 | 已加入 `cargo-deny`、`cargo-audit`、Git dependency/feature policy；`npm audit` 先报告后决策 | T16 提交配置和 CI 证据 |
 | P2 | 全部测试 | 原则保留 | 出现重复 fixture/snapshot/性质测试代码时按需引入，不为尚不存在的重复提前加依赖 |
@@ -90,7 +90,7 @@ T15/T17 已明确“禁止手工维护镜像 DTO interface”。
 
 ### 3.3 T17：Vue 基础设施
 
-T17 受 T16 阻塞，因此尚未提前加入正式路由、store 和测试依赖；任务已指定：
+T17 已在 T16 门禁通过后实现正式路由、store 和测试基础设施：
 
 - [Vue Router](https://router.vuejs.org/)：Tools、Runs、Settings、未来 Skills 路由；
 - [Pinia](https://pinia.vuejs.org/)：snapshot、运行队列、设置等跨页面状态；

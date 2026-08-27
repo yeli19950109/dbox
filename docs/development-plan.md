@@ -471,13 +471,13 @@ dbox://tool-state-changed
 
 ### Phase 4：图形界面对接（3–4 天）
 
-- [ ] 使用 Vue Router、Pinia、Vitest/Vue Test Utils 和 T15 生成的 bindings 完成前端壳层；
-- [ ] 完成工具列表、详情、刷新、筛选和 Provider 诊断；
-- [ ] 完成组件级策略选择、更新预览与确认；
-- [ ] 完成实时日志、运行历史、取消、重试和批量结果；
-- [ ] 使用 `@tanstack/vue-virtual` 处理持续日志/大列表，VueUse 处理通用节流，`axe-core` 做基础可访问性回归；
-- [ ] 完成设置、manifest 校验与 revision 冲突交互；
-- [ ] 前端只消费后端 DTO/UpdatePlan，不复制版本比较、命令生成或队列业务逻辑。
+- [x] 使用 Vue Router、Pinia、Vitest/Vue Test Utils 和 T15 生成的 bindings 完成前端壳层；
+- [x] 完成工具列表、详情、刷新、筛选和 Provider 诊断；
+- [x] 完成组件级策略选择、更新预览与确认；
+- [x] 完成实时日志、运行历史、取消、重试和批量结果；
+- [x] 使用 `@tanstack/vue-virtual` 处理持续日志/大列表，VueUse 处理通用节流，`axe-core` 做基础可访问性回归；
+- [x] 完成设置、manifest 校验与 revision 冲突交互；
+- [x] 前端只消费后端 DTO/UpdatePlan，不复制版本比较、命令生成或队列业务逻辑。
 
 **完成标准：** 在已经通过 T16 的后端之上完成 UI 对接；用户能检查和更新任意 npm/brew 全局安装项；Pi 仅用于证明多组件增强模型。
 

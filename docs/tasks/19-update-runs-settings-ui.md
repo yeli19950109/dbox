@@ -1,6 +1,6 @@
 # T19：更新确认、运行记录与设置界面
 
-- 状态：Blocked until T16
+- 状态：Completed
 - 阶段：图形界面
 - 依赖：T14、T17、T18
 - 阻塞：T20
@@ -33,3 +33,12 @@
 ## 完成标准
 
 使用后端 fake fixture 可以从刷新走到更新结果；真实命令永远由已确认的后端计划执行；持续日志没有自研 virtualizer 或通用 throttle/debounce。
+
+## 验证记录
+
+- 完成日期：2026-08-27
+- 关键文件：`src/views/ConfirmView.vue`、`src/views/RunsView.vue`、`src/components/RunLog.vue`、`src/views/SettingsView.vue`、`src/stores/runs.ts`、`src/stores/settings.ts`、对应 `*.test.ts`
+- 执行命令：`npm test`、`npm run build`、`npm run bindings:check`、`rg -n "plugin-shell|child_process|Deno.Command|Bun.spawn" src -g '!bindings.ts' -g '!*.test.ts' -g '!test/**'`
+- 测试结果：覆盖 plan id/hash-only 确认、失效计划重新预览、批量部分失败、取消、重试、post-check unknown、10,000 行虚拟日志 DOM 有界、高频事件不丢行/最终状态、跨 Run 隔离、脱敏日志复制、设置与 manifest revision 冲突，以及运行/日志/取消/重试的 axe-core 可访问性；fake transport 可完成 preview → confirm → result 流程。
+- 实现约束：program/argv/cwd/网络风险全部直接展示后端 UpdatePlan；日志正确性来自每 Run 十进制 sequence，VueUse throttle 仅触发绘制；前端不存在 shell/process 执行入口。
+- 已知限制：T15 当前 confirm API 返回单项执行结果，批量 UI 按计划顺序确认并汇总，任一执行失败不会阻止后续已生成计划；API 级错误会逐项提示。

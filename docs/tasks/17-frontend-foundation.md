@@ -1,6 +1,6 @@
 # T17：前端壳层与类型化 API
 
-- 状态：Blocked until T16
+- 状态：Completed
 - 阶段：图形界面
 - 依赖：T16
 - 阻塞：T18、T19、T22
@@ -28,3 +28,12 @@
 ## 完成标准
 
 应用可以连接 Fake/真实 Tauri API 展示空快照和导航；没有工具管理细节 UI；不在 TypeScript 复制 DTO、版本比较或计划校验逻辑；没有自研 router/store/test runner。
+
+## 验证记录
+
+- 完成日期：2026-08-27
+- 关键文件：`src/router/index.ts`、`src/api/transport.ts`、`src/stores/`、`src/components/AppLoading.vue`、`src/components/AppEmptyState.vue`、`src/components/AppErrorBoundary.vue`、`src/components/NotificationCenter.vue`、`src/test/`、`docs/frontend-dependencies.md`
+- 执行命令：`npm run bindings:check`、`npm run build`、`npm test`、`npm audit`
+- 测试结果：Vue Router、Pinia 初始化、生成 DTO 映射、十进制事件序号、过期/重复事件、跨 Run 隔离、未知后端字段和全局状态组件均由 Vitest/Vue Test Utils 覆盖；全部前端测试通过。
+- 依赖治理：直接依赖全部使用精确版本；许可证、维护状态、Node 要求与必要性记录在 `docs/frontend-dependencies.md`。
+- 已知限制：浏览器单独打开 Vite 页面没有 Tauri transport；正式运行路径为 Tauri WebView，测试使用与生成 bindings 同类型的 fake transport。
