@@ -328,6 +328,36 @@ pub enum RunStatus {
     Partial,
 }
 
+impl RunStatus {
+    pub fn transition_to(self, next: Self) -> Result<Self, InvalidRunStatusTransition> {
+        use RunStatus::{
+            Cancelled, Failed, Interrupted, Partial, Queued, Running, Succeeded, TimedOut,
+        };
+        if matches!(
+            (self, next),
+            (Queued, Running | Cancelled | Interrupted)
+                | (
+                    Running,
+                    Succeeded | Failed | Cancelled | TimedOut | Interrupted | Partial
+                )
+        ) {
+            Ok(next)
+        } else {
+            Err(InvalidRunStatusTransition {
+                from: self,
+                to: next,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("invalid run status transition from {from:?} to {to:?}")]
+pub struct InvalidRunStatusTransition {
+    pub from: RunStatus,
+    pub to: RunStatus,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Run {
@@ -435,5 +465,19 @@ mod tests {
 
         let empty: Result<ProviderId, _> = serde_json::from_str("\"\"");
         assert!(empty.is_err());
+    }
+
+    #[test]
+    fn run_status_machine_rejects_terminal_and_skipped_transitions() {
+        assert_eq!(
+            RunStatus::Queued.transition_to(RunStatus::Running),
+            Ok(RunStatus::Running)
+        );
+        assert!(RunStatus::Queued
+            .transition_to(RunStatus::Succeeded)
+            .is_err());
+        assert!(RunStatus::Succeeded
+            .transition_to(RunStatus::Running)
+            .is_err());
     }
 }

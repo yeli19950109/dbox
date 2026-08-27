@@ -1,6 +1,6 @@
 # T07：基于开源库的命令规格与 UpdatePlan
 
-- 状态：Pending
+- 状态：Completed
 - 阶段：Rust 执行内核
 - 依赖：T02、T04
 - 阻塞：T08、T10–T15、T21

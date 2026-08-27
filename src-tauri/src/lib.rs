@@ -1,5 +1,6 @@
 pub mod catalog;
 pub mod domain;
+pub mod environment;
 pub mod executor;
 pub mod persistence;
 pub mod providers;

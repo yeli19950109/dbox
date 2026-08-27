@@ -1,6 +1,6 @@
 # T09：基于开源库的 GUI 环境与命令解析
 
-- 状态：Pending
+- 状态：Completed
 - 阶段：Rust Provider 基础
 - 依赖：T03、T07
 - 阻塞：T10、T11、T15、T21、T23–T26
