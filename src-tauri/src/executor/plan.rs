@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::str::FromStr;
 
 use chrono::{DateTime, Duration, Utc};
 use secrecy::{ExposeSecret, SecretString};
@@ -343,6 +344,14 @@ impl fmt::Display for PlanId {
     }
 }
 
+impl FromStr for PlanId {
+    type Err = uuid::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Uuid::parse_str(value).map(Self)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PlanHash(String);
@@ -352,6 +361,26 @@ impl PlanHash {
         &self.0
     }
 }
+
+impl FromStr for PlanHash {
+    type Err = InvalidPlanHash;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value.len() == 64
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            Ok(Self(value.to_owned()))
+        } else {
+            Err(InvalidPlanHash)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("plan hash must be a 64-character lowercase hexadecimal hash")]
+pub struct InvalidPlanHash;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdatePlan {

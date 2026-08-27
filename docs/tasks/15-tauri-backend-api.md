@@ -1,6 +1,6 @@
 # T15：Tauri 后端 API 与事件边界
 
-- 状态：Pending
+- 状态：Completed
 - 阶段：Rust 接口层
 - 依赖：T09、T13、T14
 - 阻塞：T16–T19、T21、T22
@@ -41,3 +41,11 @@ Rust 测试可以直接调用 command handler 或其薄封装验证完整契约�
 ## 非目标
 
 - 不实现 Vue store、页面或视觉交互。
+
+## 验证记录
+
+- 完成日期：2026-08-27
+- 关键文件：`src-tauri/src/api/`、`src-tauri/src/bin/export-bindings.rs`、`src-tauri/src/lib.rs`、`src-tauri/capabilities/default.json`、`src/bindings.ts`、`src-tauri/tests/api_contract.rs`、`src-tauri/tests/fixtures/api-snapshot-v1.json`
+- 执行命令：`cargo fmt --manifest-path src-tauri/Cargo.toml --check`、`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`、`cargo test --manifest-path src-tauri/Cargo.toml`、`npm run bindings:check`、`npm run build`
+- 测试结果：公开 schema revision 为 1；12 个粗粒度 command、4 类 typed event 和独立公开 DTO 已生成到 TypeScript。契约测试覆盖 JSON golden、bindings 无漂移、not-found/invalid-plan/conflict/internal 映射、非法 ID/hash 前置拒绝、settings/manifest revision、输出批量与跨 Run 隔离，以及 capability 不包含 shell/process 权限；无需打开窗口即可通过。
+- 已知限制：`specta`/`tauri-specta` 仍是精确锁定的 release-candidate 版本，升级必须重跑 ADR 0002 compatibility spike；正式 Vue transport/store 属于 T17，未在本任务实现。

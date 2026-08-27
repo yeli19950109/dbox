@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::SystemTime;
 
 use atomic_write_file::AtomicWriteFile;
@@ -62,6 +63,10 @@ impl AppPaths {
     pub fn runs_dir(&self) -> PathBuf {
         self.log_dir.join("runs")
     }
+
+    pub fn manifests_dir(&self) -> PathBuf {
+        self.config_dir.join("tools.d")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -77,6 +82,26 @@ impl Revision {
         &self.0
     }
 }
+
+impl FromStr for Revision {
+    type Err = InvalidRevision;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value.len() == 64
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            Ok(Self(value.to_owned()))
+        } else {
+            Err(InvalidRevision)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("revision must be a 64-character lowercase hexadecimal hash")]
+pub struct InvalidRevision;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Versioned<T> {
@@ -175,10 +200,102 @@ impl PersistenceStore {
             &self.paths.data_dir,
             &self.paths.log_dir,
             &self.paths.runs_dir(),
+            &self.paths.manifests_dir(),
         ] {
             fs::create_dir_all(path).map_err(|error| StoreError::io(path, error))?;
         }
         Ok(())
+    }
+
+    pub fn user_manifest_path(&self, file_name: &str) -> Result<PathBuf, StoreError> {
+        let path = Path::new(file_name);
+        let safe = path.components().count() == 1
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "toml")
+            && path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_some_and(|stem| {
+                    !stem.is_empty()
+                        && !stem.starts_with('.')
+                        && stem.chars().all(|character| {
+                            character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+                        })
+                });
+        if !safe {
+            return Err(StoreError {
+                path: self.paths.manifests_dir(),
+                kind: StoreErrorKind::InvalidFileName,
+                message: "manifest filename must be a simple name ending in .toml".into(),
+            });
+        }
+        Ok(self.paths.manifests_dir().join(path))
+    }
+
+    pub fn load_user_manifest(
+        &self,
+        file_name: &str,
+    ) -> Result<Option<Versioned<String>>, StoreError> {
+        self.ensure_directories()?;
+        let path = self.user_manifest_path(file_name)?;
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = read_all(&path)?;
+        let contents = String::from_utf8(bytes.clone()).map_err(|error| StoreError {
+            path: path.clone(),
+            kind: StoreErrorKind::Corrupt,
+            message: error.to_string().into_boxed_str(),
+        })?;
+        Ok(Some(Versioned {
+            revision: Revision::from_bytes(&bytes),
+            value: contents,
+        }))
+    }
+
+    pub fn save_user_manifest(
+        &self,
+        file_name: &str,
+        expected_revision: Option<&Revision>,
+        contents: &str,
+    ) -> Result<Versioned<String>, StoreError> {
+        self.ensure_directories()?;
+        let path = self.user_manifest_path(file_name)?;
+        match (self.load_user_manifest(file_name)?, expected_revision) {
+            (Some(current), Some(expected)) => {
+                require_revision(&path, expected, &current.revision)?;
+            }
+            (Some(current), None) => {
+                return Err(StoreError {
+                    path,
+                    kind: StoreErrorKind::RevisionConflict,
+                    message: format!(
+                        "revision conflict: existing manifest has revision {}",
+                        current.revision.as_str()
+                    )
+                    .into_boxed_str(),
+                });
+            }
+            (None, Some(expected)) => {
+                return Err(StoreError {
+                    path,
+                    kind: StoreErrorKind::RevisionConflict,
+                    message: format!(
+                        "revision conflict: expected {}, but the manifest does not exist",
+                        expected.as_str()
+                    )
+                    .into_boxed_str(),
+                });
+            }
+            (None, None) => {}
+        }
+        let bytes = contents.as_bytes();
+        atomic_write(&path, bytes)?;
+        Ok(Versioned {
+            revision: Revision::from_bytes(bytes),
+            value: contents.to_owned(),
+        })
     }
 
     pub fn load_settings(&self) -> Result<Versioned<Settings>, StoreError> {
@@ -545,6 +662,7 @@ pub enum StoreErrorKind {
     UnsupportedSchema,
     RevisionConflict,
     InvalidRunId,
+    InvalidFileName,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -633,6 +751,53 @@ mod tests {
         assert!(store.paths().settings_file().is_file());
         assert!(store.paths().state_file().is_file());
         assert!(store.paths().runs_dir().is_dir());
+        assert!(store.paths().manifests_dir().is_dir());
+    }
+
+    #[test]
+    fn revisions_require_canonical_lowercase_hashes() {
+        let hash = "a".repeat(64);
+        assert_eq!(Revision::from_str(&hash).unwrap().as_str(), hash);
+        assert!(Revision::from_str(&"A".repeat(64)).is_err());
+        assert!(Revision::from_str(&"a".repeat(63)).is_err());
+        assert!(Revision::from_str(&"g".repeat(64)).is_err());
+    }
+
+    #[test]
+    fn user_manifests_are_revision_guarded_and_cannot_escape_their_directory() {
+        let (_temporary, store) = store();
+        let contents = "schema_version = 1\nid = \"fixture\"\n";
+        let created = store
+            .save_user_manifest("fixture.toml", None, contents)
+            .unwrap();
+        assert_eq!(
+            store.load_user_manifest("fixture.toml").unwrap().unwrap(),
+            created
+        );
+
+        let conflict = store
+            .save_user_manifest("fixture.toml", None, contents)
+            .unwrap_err();
+        assert_eq!(conflict.kind, StoreErrorKind::RevisionConflict);
+
+        let updated = store
+            .save_user_manifest(
+                "fixture.toml",
+                Some(&created.revision),
+                &format!("{contents}display_name = \"Fixture\"\n"),
+            )
+            .unwrap();
+        assert_ne!(updated.revision, created.revision);
+
+        for unsafe_name in [
+            "../outside.toml",
+            "nested/tool.toml",
+            ".hidden.toml",
+            "tool.txt",
+        ] {
+            let error = store.user_manifest_path(unsafe_name).unwrap_err();
+            assert_eq!(error.kind, StoreErrorKind::InvalidFileName);
+        }
     }
 
     #[test]

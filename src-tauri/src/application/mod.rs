@@ -23,7 +23,7 @@ use crate::executor::{
     CommandExecutor, CommandSpec, ConfirmationContext, ExecutionError, ExecutionResult,
     PlanContext, PlanError, PlanHash, PlanId, UpdatePlan, UpdatePlanView,
 };
-use crate::persistence::{PersistenceStore, Revision, Settings, StoreError};
+use crate::persistence::{PersistenceStore, Revision, Settings, StoreError, Versioned};
 use crate::providers::{
     ProviderError, ProviderRegistry, ProviderRegistryError, ProviderStatus, ProviderUpdateRequest,
     Recoverability, UpdateCheck,
@@ -208,7 +208,7 @@ type ComponentMemory = BTreeMap<ComponentKey, RememberedComponent>;
 
 pub struct ApplicationService {
     registry: Arc<ProviderRegistry>,
-    catalog: Catalog,
+    catalog: RwLock<Catalog>,
     store: Arc<PersistenceStore>,
     executor: CommandExecutor,
     environment: Arc<dyn ApplicationEnvironment>,
@@ -261,7 +261,7 @@ impl ApplicationService {
         };
         Ok(Self {
             registry,
-            catalog,
+            catalog: RwLock::new(catalog),
             store,
             executor,
             environment,
@@ -278,6 +278,16 @@ impl ApplicationService {
 
     pub async fn snapshot(&self) -> ApplicationSnapshot {
         self.state.read().await.snapshot.clone()
+    }
+
+    pub async fn installations(&self) -> Vec<Installation> {
+        self.state
+            .read()
+            .await
+            .installations
+            .values()
+            .cloned()
+            .collect()
     }
 
     pub async fn refresh_tools(
@@ -410,7 +420,7 @@ impl ApplicationService {
         }
 
         let installation_values: Vec<_> = installations.values().cloned().collect();
-        let catalog_snapshot = self.catalog.enrich(&installation_values);
+        let catalog_snapshot = self.catalog.read().await.enrich(&installation_values);
         let mut tools = catalog_snapshot.tools;
         apply_component_memory(&mut tools, &previous_components);
         apply_checks(&mut tools, &fresh_checks);
@@ -477,6 +487,22 @@ impl ApplicationService {
         state.snapshot.config_revision = saved_settings.revision.as_str().into();
         state.snapshot.state_revision = saved_state.as_str().into();
         Ok(state.snapshot.clone())
+    }
+
+    pub async fn update_settings(
+        &self,
+        expected_revision: &Revision,
+        settings: &Settings,
+    ) -> Result<Versioned<Settings>, ApplicationError> {
+        let _operation = self.operation.lock().await;
+        let saved_settings = self.store.save_settings(expected_revision, settings)?;
+        let mut state = self.state.write().await;
+        apply_strategy_preferences(&mut state.snapshot.tools, &saved_settings.value);
+        let saved_state =
+            self.persist_tools(&state.snapshot.tools, state.snapshot.refreshed_at, None)?;
+        state.snapshot.config_revision = saved_settings.revision.as_str().into();
+        state.snapshot.state_revision = saved_state.as_str().into();
+        Ok(saved_settings)
     }
 
     pub async fn preview_updates(
@@ -598,6 +624,18 @@ impl ApplicationService {
         request: ConfirmUpdateRequest,
         cancellation: CancellationToken,
     ) -> Result<ConfirmedUpdate, ApplicationError> {
+        let run_id =
+            RunId::new(uuid::Uuid::new_v4().to_string()).expect("a UUID is a valid run ID");
+        self.confirm_update_with_run_id(request, run_id, cancellation)
+            .await
+    }
+
+    pub async fn confirm_update_with_run_id(
+        &self,
+        request: ConfirmUpdateRequest,
+        run_id: RunId,
+        cancellation: CancellationToken,
+    ) -> Result<ConfirmedUpdate, ApplicationError> {
         let _operation = self.operation.lock().await;
         let plan = self
             .state
@@ -646,8 +684,6 @@ impl ApplicationService {
                 .status = ComponentStatus::Updating;
         }
 
-        let run_id =
-            RunId::new(uuid::Uuid::new_v4().to_string()).expect("a UUID is a valid run ID");
         let mut execution = match self
             .executor
             .execute(run_id.clone(), &confirmed, cancellation)
@@ -761,6 +797,39 @@ impl ApplicationService {
             execution,
             snapshot,
         })
+    }
+
+    pub async fn reload_catalog(
+        &self,
+        catalog: Catalog,
+        catalog_errors: Vec<CatalogError>,
+    ) -> Result<ApplicationSnapshot, ApplicationError> {
+        let _operation = self.operation.lock().await;
+        let settings = self.store.load_settings()?;
+        let (installations, previous_snapshot) = {
+            let state = self.state.read().await;
+            (
+                state.installations.values().cloned().collect::<Vec<_>>(),
+                state.snapshot.clone(),
+            )
+        };
+        let memory = component_memory(&previous_snapshot.tools);
+        let catalog_snapshot = catalog.enrich(&installations);
+        let mut tools = catalog_snapshot.tools;
+        apply_component_memory(&mut tools, &memory);
+        apply_strategy_preferences(&mut tools, &settings.value);
+        tools.sort_by(|left, right| left.id.cmp(&right.id));
+        let saved = self.persist_tools(&tools, previous_snapshot.refreshed_at, None)?;
+
+        *self.catalog.write().await = catalog;
+        let mut state = self.state.write().await;
+        state.snapshot.tools = tools;
+        state.snapshot.catalog_diagnostics = catalog_snapshot.diagnostics;
+        state.snapshot.catalog_errors = catalog_errors;
+        state.snapshot.config_revision = settings.revision.as_str().into();
+        state.snapshot.state_revision = saved.as_str().into();
+        state.provider_refreshed.clear();
+        Ok(state.snapshot.clone())
     }
 
     async fn provider_ids_for_scope(

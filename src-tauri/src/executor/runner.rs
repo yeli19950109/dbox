@@ -897,7 +897,7 @@ mod tests {
     async fn wait_for_pid_files(prefix: &Path) -> (i32, i32) {
         let parent_file = PathBuf::from(format!("{}.parent", prefix.display()));
         let child_file = PathBuf::from(format!("{}.child", prefix.display()));
-        for _ in 0..100 {
+        for _ in 0..250 {
             if parent_file.exists() && child_file.exists() {
                 let parent = std::fs::read_to_string(&parent_file)
                     .unwrap()
@@ -947,7 +947,10 @@ mod tests {
             &program,
             vec!["sleep-tree".into(), timeout_prefix.display().to_string()],
         );
-        timeout_command.timeout_seconds = 1;
+        // Process startup can be delayed when the full test suite is running in
+        // parallel. Keep this well above the fixture's PID-file handshake so the
+        // test measures cleanup after timeout instead of scheduler latency.
+        timeout_command.timeout_seconds = 5;
         let timeout_task = tokio::spawn({
             let executor = executor(&temporary, Arc::new(NoopEventSink), 1024);
             let confirmed = confirmed(timeout_command);

@@ -1,3 +1,4 @@
+pub mod api;
 pub mod application;
 pub mod catalog;
 pub mod domain;
@@ -9,7 +10,16 @@ pub mod version;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tauri::Manager;
+
+    let api_builder = api::specta_builder();
     tauri::Builder::default()
+        .invoke_handler(api_builder.invoke_handler())
+        .setup(move |app| {
+            api_builder.mount_events(app);
+            app.manage(api::ApiState::production(app.handle())?);
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
