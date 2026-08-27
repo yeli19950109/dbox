@@ -1,6 +1,6 @@
 # T10：npm Global Provider
 
-- 状态：Pending
+- 状态：Completed
 - 阶段：Rust Provider
 - 依赖：T03、T04、T07–T09
 - 阻塞：T12、T13、T16
@@ -37,3 +37,10 @@ fixture npm 可以端到端完成 scan → check → plan；所有安装项均�
 - 不管理项目 local dependencies。
 - 不实现 npm package 安装商店。
 
+## 验证记录
+
+- 完成日期：2026-08-27
+- 关键文件：`src-tauri/src/providers/npm_global.rs`、`src-tauri/tests/npm_global_provider.rs`、`src-tauri/tests/fixtures/fake-npm.sh`
+- 执行命令：`cargo fmt --check`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test`
+- 测试结果：fake npm 端到端覆盖 probe → scan → check → plan，以及空列表、scoped package、多 bin、缺失 bin、npm 自身、异常条目、缓存、离线、畸形 JSON、多 prefix 和单包 argv。
+- 已知限制：每个 Provider 实例绑定一个已解析的 npm executable/global root；多个 Node prefix 通过各自来源指纹保持 Installation ID 不碰撞。
