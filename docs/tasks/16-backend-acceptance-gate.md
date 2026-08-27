@@ -19,6 +19,7 @@
 6. GUI PATH 缺失时通过用户路径/候选路径解析 fake executable。
 7. 配置 revision 或 program 路径改变后旧计划被拒绝。
 8. 测试期间不调用真实 npm/brew/npx，不修改任何真实全局安装。
+9. T07–T09 的 ADR、许可证/MSRV 记录完整；代码审查确认没有自研 shell quoting、hash、PID 树、process group、取消原语、PATH 搜索或 shell profile 解析。
 
 ## 门禁命令
 
@@ -46,4 +47,3 @@ npm run build
 
 - 不以手工点击界面代替后端自动化测试。
 - 不要求真实执行系统包升级。
-

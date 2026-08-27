@@ -135,7 +135,7 @@ src-tauri/src/
   catalog/             # 可选 manifest 增强、覆盖与迁移
   discovery/           # PATH 与 executable 映射
   version/             # 版本解析与比较
-  executor/            # preview、spawn、stream、cancel、timeout
+  executor/            # Tokio/process-wrap 等开源库的薄适配
   persistence/         # settings、cache、history
   environment/         # GUI 环境/PATH 解析与诊断
   integrations/
@@ -263,15 +263,16 @@ timeout_seconds = 900
 
 macOS 图形应用通常拿不到交互式终端中的完整 `PATH`，而 npm 又可能由 nvm、fnm、mise 或 asdf 管理。这是 MVP 的关键技术风险，必须在业务功能之前解决。
 
+环境基础设施不自行实现：启动时优先使用 Tauri 官方 [`fix-path-env-rs`](https://github.com/tauri-apps/fix-path-env-rs) 修复 GUI PATH，并使用 [`which`](https://docs.rs/which/latest/which/) 定位 executable。dbox 只保留用户覆盖、缓存、Provider 报告路径和诊断信息的编排。
+
 环境解析顺序建议如下：
 
 1. 用户在设置中指定的可执行文件绝对路径；
 2. dbox 上次验证成功的绝对路径；
-3. 应用进程的 `PATH`；
-4. 已知 Homebrew 目录：Apple Silicon `/opt/homebrew/bin`、Intel `/usr/local/bin`；
-5. 可选的登录 shell 环境快照。
+3. `fix-path-env-rs` 修复后的应用 `PATH`，由 `which` 返回一个或多个候选；
+4. Provider 自身通过公开 CLI 报告的路径，例如已定位的 `brew --prefix`。
 
-登录 shell 只用于获取环境快照，不用于执行更新命令。解析到 `npm`、`brew`、`pi` 等程序后，后端使用绝对路径和独立参数直接 spawn。设置页应展示“终端可见但 dbox 不可见”的诊断结果，并允许用户刷新或覆盖路径。
+dbox 不解析 `.zshrc`/`.bashrc`，不自行实现 `which` 或跨平台目录规则。解析到 `npm`、`brew`、`pi` 等程序后，后端使用绝对路径和独立参数执行。设置页应展示“终端可见但 dbox 不可见”、多路径冲突和库调用失败的诊断结果，并允许用户刷新或覆盖路径。
 
 ### 7.2 Provider 接口
 
@@ -342,14 +343,18 @@ Deno、Bun、Flutter 可能同时来自 brew、mise 或直接安装。dbox 应�
 
 前端确认时只回传 `plan_id`/`plan_hash`，后端执行原计划；若配置、程序路径或版本快照已变化，则计划失效并要求重新预览，防止“看到的命令”和“执行的命令”不一致。
 
+CommandPlan 只是一层 dbox 领域 DTO。序列化、UUID、hash、secret 和展示转义分别使用 `serde`、`uuid`、`blake3`、`secrecy` 及维护中的 quoting crate，不自研通用命令 DSL 或安全基础设施。
+
 ### 8.2 执行约束
 
 - 同一 Tool 同时只能有一个更新任务；
 - 默认全局并发数为 1，MVP 暂不并发操作包管理器，避免 brew/npm 锁和相互覆盖；
 - 批量更新按工具排队，一个任务失败不阻断其他工具，但最终显示部分成功；
-- stdout/stderr 分流采集并通过 Tauri event 增量发送；
-- 支持超时和用户取消，先发 graceful termination，超时后再强制结束子进程树；
-- 限制内存中的日志长度，完整日志落盘并轮转；
+- 使用 `tokio` 负责异步进程、stdout/stderr 和 timeout/select；
+- 使用 `process-wrap` 的 Tokio/process-group/kill-on-drop 能力管理进程组，不手写 PID 树、signal 或平台 unsafe 代码；
+- 使用 `tokio-util::CancellationToken` 传递取消，并通过 `process-wrap` 清理进程组；
+- 使用 `tracing` 生态及成熟 ANSI/字节 crate 实现结构化日志、有界缓冲和容错；
+- dbox 只给库输出增加 RunId、事件序号和业务状态映射；
 - 更新成功的判断条件是退出码成功且 post-check 通过；退出码成功但版本验证失败显示“命令成功，验证未知/失败”；
 - 不自动输入密码，不缓存 sudo 凭据；检测到权限或交互提示时终止并给出终端操作建议。
 
@@ -436,7 +441,7 @@ dbox://tool-state-changed
 - [ ] 实现 ToolProvider trait、Provider Registry 和 capability 模型；
 - [ ] 实现 TOML schema、校验、内置清单与用户覆盖合并；
 - [ ] 实现应用目录和原子持久化；
-- [ ] 实现安全 spawn、输出流、超时、取消和日志脱敏；
+- [ ] 集成 Tokio/process-wrap/CancellationToken/tracing 等开源库，完成命令执行薄适配；
 - [ ] 实现 UpdatePlan 预览与 hash 校验；
 - [ ] 使用 fixture 假命令覆盖成功、失败、超时和取消。
 
@@ -543,7 +548,7 @@ dbox://tool-state-changed
 
 | 风险 | 应对 |
 | --- | --- |
-| GUI 与终端 PATH 不一致 | 环境诊断、绝对路径缓存、登录 shell 快照、用户覆盖 |
+| GUI 与终端 PATH 不一致 | `fix-path-env-rs`、`which`、绝对路径缓存、用户覆盖和诊断 |
 | 包管理器输出和更新语义变化 | Provider 集中适配并配 fixture 回归；特殊工具用版本化 catalog/override |
 | 同一 CLI 有多个发行包或安装来源 | Installation 独立建模，发现后让用户确认来源 |
 | 安装项数量多、列表噪声大 | 默认全部纳管，同时提供 Provider/类别/有更新筛选和用户隐藏状态 |

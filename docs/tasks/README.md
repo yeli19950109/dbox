@@ -11,6 +11,7 @@
 5. **后端门禁。** T16 是前端开工条件；Rust 格式化、Clippy、测试和集成场景全部通过后才解锁 UI。
 6. **Provider 优先于白名单。** npm/brew 的全部全局安装项均由 Provider 自动生成 Tool；catalog 只做特殊增强。
 7. **Skill 不自研。** Skill 管理只通过 `npx skills`，dbox 不读写其目录和 lock 文件。
+8. **基础设施不自研。** 命令执行、进程组、取消、PATH 修复和 executable 查找优先采用维护中的开源库；dbox 只保留领域编排和薄适配。自定义替代必须先用 ADR 证明现有库确实不满足。
 
 ## 状态值
 
@@ -30,9 +31,9 @@
 | T04 | [版本比较与状态汇总](04-version-and-status.md) | T02 | SemVer/unknown/partial 纯单测 |
 | T05 | [可选 Manifest 与 Catalog 合并](05-manifest-catalog.md) | T02、T04 | 无 manifest 仍可管理，覆盖合并测试 |
 | T06 | [设置、缓存与运行记录持久化](06-persistence.md) | T01、T02 | 临时目录、原子写入、revision 测试 |
-| T07 | [安全命令规格与 UpdatePlan](07-command-plan.md) | T02、T04 | argv 隔离、hash、过期计划测试 |
-| T08 | [命令执行器、日志、超时与取消](08-command-executor.md) | T06、T07 | fake process 集成测试 |
-| T09 | [GUI 环境与可执行文件解析](09-environment-resolver.md) | T03、T07 | fake PATH/候选路径测试 |
+| T07 | [基于开源库的命令规格与 UpdatePlan](07-command-plan.md) | T02、T04 | argv 隔离、hash、过期计划测试 |
+| T08 | [基于开源库的命令执行适配层](08-command-executor.md) | T06、T07 | fake process 集成测试 |
+| T09 | [基于开源库的 GUI 环境与命令解析](09-environment-resolver.md) | T03、T07 | fake PATH/候选路径测试 |
 | T10 | [npm Global Provider](10-npm-global-provider.md) | T03、T04、T07–T09 | 全部 global package fixture |
 | T11 | [Homebrew Provider](11-homebrew-provider.md) | T03、T04、T07–T09 | 全部 formula/cask fixture |
 | T12 | [Catalog 增强与 Pi 示例](12-catalog-enrichment-pi.md) | T05、T10、T11 | 通用 Tool + 多组件增强测试 |
@@ -88,4 +89,3 @@ T01 → T02 → T03/T04/T06 → T05/T07 → T08/T09
 - 测试结果：
 - 已知限制：
 ```
-
