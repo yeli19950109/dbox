@@ -1,6 +1,6 @@
 # T11：Homebrew Provider
 
-- 状态：Pending
+- 状态：Completed
 - 阶段：Rust Provider
 - 依赖：T03、T04、T07–T09
 - 阻塞：T12、T13、T16
@@ -37,3 +37,10 @@ fixture brew 可以端到端完成 scan → check → plan；formula/cask 身份
 - 不运行 `brew cleanup`。
 - 不自动 unpin 或处理 sudo。
 
+## 验证记录
+
+- 完成日期：2026-08-27
+- 关键文件：`src-tauri/src/providers/homebrew.rs`、`src-tauri/tests/homebrew_provider.rs`、`src-tauri/tests/fixtures/fake-brew.sh`
+- 执行命令：`cargo fmt --check`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test`
+- 测试结果：fake brew 端到端覆盖 probe → scan → check → plan，以及空列表、formula/cask 同名、多版本、pinned、keg-only、disabled/deprecated、JSON v2 缺字段/未知字段、权限和远端失败。
+- 已知限制：executable 关联是最佳努力；每个 Provider 实例绑定一个已解析的 Homebrew executable/prefix。

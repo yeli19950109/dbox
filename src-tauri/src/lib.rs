@@ -1,3 +1,4 @@
+pub mod application;
 pub mod catalog;
 pub mod domain;
 pub mod environment;

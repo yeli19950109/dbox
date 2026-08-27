@@ -14,6 +14,7 @@ use crate::domain::{
 use crate::version::{ComponentStatus, StatusReason};
 
 pub const SUPPORTED_SCHEMA_VERSION: u32 = 1;
+pub const PI_BUILTIN_MANIFEST: &str = include_str!("../../resources/catalog/pi.toml");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -326,6 +327,77 @@ pub fn load_manifest_directory(
         .into_iter()
         .map(|file| load_manifest_file(file, layer))
         .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct CatalogLoadReport {
+    pub catalog: Catalog,
+    pub errors: Vec<CatalogError>,
+}
+
+pub fn built_in_manifests() -> Vec<LoadedManifest> {
+    vec![LoadedManifest::parse(
+        "resources/catalog/pi.toml",
+        CatalogLayer::BuiltIn,
+        PI_BUILTIN_MANIFEST,
+    )
+    .expect("the embedded Pi catalog manifest is valid")]
+}
+
+pub fn load_catalog_with_built_ins(user_directory: impl AsRef<Path>) -> CatalogLoadReport {
+    let built_ins = built_in_manifests();
+    let mut accepted_users = Vec::new();
+    let mut errors = Vec::new();
+    let mut catalog = Catalog::build(built_ins.clone())
+        .expect("the embedded catalog manifests form a valid catalog");
+    let user_directory = user_directory.as_ref();
+    if !user_directory.exists() {
+        return CatalogLoadReport { catalog, errors };
+    }
+    let entries = match fs::read_dir(user_directory) {
+        Ok(entries) => entries,
+        Err(error) => {
+            errors.push(CatalogError {
+                source: user_directory.to_path_buf(),
+                field_path: String::new().into_boxed_str(),
+                kind: CatalogErrorKind::Io,
+                message: error.to_string().into_boxed_str(),
+                hint: "Ensure the catalog directory is readable".into(),
+                line: None,
+                column: None,
+            });
+            return CatalogLoadReport { catalog, errors };
+        }
+    };
+    let mut files: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "toml")
+        })
+        .collect();
+    files.sort();
+    for file in files {
+        let loaded = match load_manifest_file(&file, CatalogLayer::User) {
+            Ok(loaded) => loaded,
+            Err(error) => {
+                errors.push(error);
+                continue;
+            }
+        };
+        let mut trial = built_ins.clone();
+        trial.extend(accepted_users.iter().cloned());
+        trial.push(loaded.clone());
+        match Catalog::build(trial) {
+            Ok(updated) => {
+                accepted_users.push(loaded);
+                catalog = updated;
+            }
+            Err(error) => errors.push(error),
+        }
+    }
+    CatalogLoadReport { catalog, errors }
 }
 
 fn validate_manifest(

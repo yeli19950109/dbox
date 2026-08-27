@@ -1,6 +1,6 @@
 # T12：Catalog 增强与 Pi 多组件示例
 
-- 状态：Pending
+- 状态：Completed
 - 阶段：Rust 功能验证
 - 依赖：T05、T10、T11
 - 阻塞：T13、T16
@@ -35,3 +35,10 @@
 
 - Pi 不是产品白名单或 MVP 唯一支持对象。
 
+## 验证记录
+
+- 完成日期：2026-08-27
+- 关键文件：`src-tauri/resources/catalog/pi.toml`、`src-tauri/src/catalog/mod.rs`、`src-tauri/tests/catalog_pi_enrichment.rs`
+- 执行命令：`cargo fmt --check`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test`
+- 测试结果：fixture 证明 Pi 只增强已有 npm Installation；core 支持 self/npm global，extensions 独立使用 `--extensions` 且不生成 `--all`；无匹配和 catalog 文件损坏均保留通用工具。
+- 已知限制：内置 matcher 使用当前文档中的 npm 包坐标；发行坐标变化时通过内置 catalog 升级或用户 manifest 覆盖。

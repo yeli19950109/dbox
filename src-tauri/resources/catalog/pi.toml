@@ -1,0 +1,63 @@
+schema_version = 1
+id = "pi"
+display_name = "Pi"
+description = "Agentic coding TUI with independently updateable core and extensions"
+categories = ["agent", "tui"]
+homepage = "https://pi.dev"
+
+[[discovery]]
+kind = "executable"
+names = ["pi"]
+
+[[installations]]
+id = "npm"
+provider_id = "npm-global"
+kind = "npm_global"
+package = "@earendil-works/pi-coding-agent"
+
+[[components]]
+id = "core"
+display_name = "Core"
+default_strategy = "self"
+version_tracking = "tracked"
+
+[components.installed_version]
+kind = "command"
+program = "pi"
+args = ["--version"]
+stream = "stdout"
+parser = { kind = "semver_regex", pattern = "([0-9]+\\.[0-9]+\\.[0-9]+)" }
+
+[components.latest_version]
+kind = "npm_registry"
+installation = "npm"
+
+[[components.update_strategies]]
+id = "self"
+display_name = "Pi self update"
+kind = "command"
+program = "pi"
+args = ["update", "--self"]
+timeout_seconds = 600
+
+[[components.update_strategies]]
+id = "npm-global"
+display_name = "npm global"
+kind = "package_manager"
+manager = "npm"
+args = ["install", "--global", "--", "@earendil-works/pi-coding-agent@latest"]
+timeout_seconds = 600
+
+[[components]]
+id = "extensions"
+display_name = "Extensions"
+default_strategy = "pi-extensions"
+version_tracking = "unsupported"
+
+[[components.update_strategies]]
+id = "pi-extensions"
+display_name = "Pi extensions update"
+kind = "command"
+program = "pi"
+args = ["update", "--extensions"]
+timeout_seconds = 900

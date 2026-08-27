@@ -11,8 +11,13 @@ use thiserror::Error;
 use crate::domain::{ComponentId, Installation, InstallationId, ProviderId, StrategyId};
 use crate::version::{ComponentStatus, VersionValue};
 
+pub mod homebrew;
 pub mod npm_global;
 
+pub use homebrew::{
+    BrewDiagnostic, BrewEnvironment, HomebrewProvider, HomebrewProviderOptions,
+    HOMEBREW_PROVIDER_ID,
+};
 pub use npm_global::{
     NpmDiagnostic, NpmEnvironment, NpmGlobalProvider, NpmProviderOptions, NPM_GLOBAL_PROVIDER_ID,
 };

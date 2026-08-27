@@ -11,7 +11,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::domain::{ProviderId, Run, RunId, Tool};
+use crate::domain::{ComponentId, ProviderId, Run, RunId, StrategyId, Tool, ToolId};
 
 pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
 pub const STATE_SCHEMA_VERSION: u32 = 1;
@@ -111,6 +111,8 @@ pub struct Settings {
     pub log_retention: LogRetentionPolicy,
     #[serde(default)]
     pub executable_overrides: BTreeMap<String, PathBuf>,
+    #[serde(default)]
+    pub component_strategies: BTreeMap<ToolId, BTreeMap<ComponentId, StrategyId>>,
 }
 
 const fn default_timeout_seconds() -> u64 {
@@ -124,6 +126,7 @@ impl Default for Settings {
             default_timeout_seconds: default_timeout_seconds(),
             log_retention: LogRetentionPolicy::default(),
             executable_overrides: BTreeMap::new(),
+            component_strategies: BTreeMap::new(),
         }
     }
 }

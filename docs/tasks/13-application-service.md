@@ -1,6 +1,6 @@
 # T13：刷新、检查与更新应用服务
 
-- 状态：Pending
+- 状态：Completed
 - 阶段：Rust 应用层
 - 依赖：T03–T12
 - 阻塞：T14–T16
@@ -37,3 +37,10 @@
 - 不暴露 Tauri command。
 - 不实现正式并发队列。
 
+## 验证记录
+
+- 完成日期：2026-08-27
+- 关键文件：`src-tauri/src/application/mod.rs`、`src-tauri/tests/application_service.rs`
+- 执行命令：`cargo fmt --check`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test`
+- 测试结果：纯 Rust fixture 覆盖 snapshot → refresh → preview → confirm → post-check；验证 Provider 隔离、空结果/延迟、并发刷新去重、强刷、按 Provider 刷新、策略持久化、revision 失效及 post-check 失败的 Partial 状态。
+- 已知限制：正式批量队列、恢复和 Provider 互斥调度由 T14 实现；本服务仅串行化有状态操作。
