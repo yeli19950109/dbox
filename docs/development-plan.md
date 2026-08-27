@@ -123,11 +123,11 @@ flowchart LR
 
 ```text
 src/
-  api/                 # 类型化 invoke/event 封装
+  api/                 # 由 Rust API DTO 生成的 command/event bindings 与薄封装
   components/          # 通用 UI 组件
   views/               # Tools、Runs、Settings
   stores/              # 工具状态、运行队列、设置
-  types/               # 与 Rust DTO 对齐的类型
+  types/               # 前端专有类型；Rust API DTO 类型不手工镜像
 src-tauri/src/
   commands/            # Tauri command 薄适配层
   domain/              # Provider、Installation、Tool、Component、Run
@@ -155,7 +155,7 @@ tests/fixtures/bin/    # 集成测试使用的假命令
 2. `src-tauri/resources/catalog/*.toml`：随应用发布的只读增强清单，只收录需要特殊能力或展示信息的工具；
 3. `<app_config_dir>/tools.d/*.toml`：用户新增的直接安装工具，或对自动发现/内置条目的覆盖；
 4. `<app_config_dir>/settings.toml`：Provider 开关、默认策略、扫描、环境和并发设置；
-5. `<app_data_dir>/state.json`：检测缓存、上次成功版本和运行摘要，使用临时文件 + rename 原子写入；
+5. `<app_data_dir>/state.json`：检测缓存、上次成功版本和运行摘要，使用 `atomic-write-file` 承担同目录临时文件、同步和原子替换；
 6. `<app_log_dir>/runs/*.jsonl`：逐次运行的结构化日志，按数量和总大小轮转。
 
 所有目录通过 Tauri path API 获取，业务代码不硬编码 macOS 绝对路径。MVP 先使用文件持久化；当需要复杂查询、计划任务或大量历史记录时再评估 SQLite。
@@ -440,7 +440,7 @@ dbox://tool-state-changed
 - [ ] 实现 Provider/Installation/Tool/Component/Strategy/Run 领域类型；
 - [ ] 实现 ToolProvider trait、Provider Registry 和 capability 模型；
 - [ ] 实现 TOML schema、校验、内置清单与用户覆盖合并；
-- [ ] 实现应用目录和原子持久化；
+- [x] 集成原子写入库，实现应用目录、schema、revision 和 retention policy；
 - [ ] 集成 Tokio/process-wrap/CancellationToken/tracing 等开源库，完成命令执行薄适配；
 - [ ] 实现 UpdatePlan 预览与 hash 校验；
 - [ ] 使用 fixture 假命令覆盖成功、失败、超时和取消。
@@ -463,18 +463,19 @@ dbox://tool-state-changed
 - [ ] 完成 refresh → preview → confirm → execute → post-check 的纯 Rust 应用服务；
 - [ ] 完成串行批量队列、部分失败、取消、重试和中断恢复；
 - [ ] 完成运行历史、日志轮转和配置 revision 冲突处理；
-- [ ] 完成粗粒度 Tauri commands、DTO 与事件契约，但不制作正式 Vue 页面；
+- [ ] 完成粗粒度 Tauri commands、DTO 与事件契约，使用 `tauri-specta` 从公开 API DTO 生成 TypeScript bindings，但不制作正式 Vue 页面；
 - [ ] 使用 FakeProvider/fake binaries 覆盖 npm、brew、Pi 增强和异常流程；
-- [ ] 通过 T16 定义的 Rust 后端集成验收门。
+- [ ] 通过 T16 定义的 Rust 后端集成、许可证和 RustSec 验收门。
 
 **完成标准：** 不打开图形界面也能用自动化测试验证全部基本业务；20 个模拟任务不会死锁，失败不阻断后续队列；fmt、Clippy、Rust tests 全部通过。未达到此标准不得开始正式 UI。
 
 ### Phase 4：图形界面对接（3–4 天）
 
-- [ ] 完成 Vue 路由、stores 和类型化 Tauri API；
+- [ ] 使用 Vue Router、Pinia、Vitest/Vue Test Utils 和 T15 生成的 bindings 完成前端壳层；
 - [ ] 完成工具列表、详情、刷新、筛选和 Provider 诊断；
 - [ ] 完成组件级策略选择、更新预览与确认；
 - [ ] 完成实时日志、运行历史、取消、重试和批量结果；
+- [ ] 使用 `@tanstack/vue-virtual` 处理持续日志/大列表，VueUse 处理通用节流，`axe-core` 做基础可访问性回归；
 - [ ] 完成设置、manifest 校验与 revision 冲突交互；
 - [ ] 前端只消费后端 DTO/UpdatePlan，不复制版本比较、命令生成或队列业务逻辑。
 
@@ -483,7 +484,7 @@ dbox://tool-state-changed
 ### Phase 5：打包与 MVP 验收（1–2 天）
 
 - [ ] 完成 macOS Apple Silicon/Intel 构建验证；
-- [ ] 检查图标、签名/公证方案、应用升级和权限说明；
+- [ ] 使用 Tauri CLI/bundler/updater 与官方签名、公证、CI 链路，检查图标和权限说明；
 - [ ] 完成新用户空状态、无包管理器和 PATH 异常走查；
 - [ ] 编写用户配置、故障排查和添加工具清单文档；
 - [ ] 固化回归测试清单并产出首个 MVP 包。
@@ -522,10 +523,11 @@ dbox://tool-state-changed
 
 ### 12.3 前端测试
 
-- store 和 DTO 映射单测；
+- Pinia store、生成 bindings 适配和 DTO 映射单测；
 - 工具列表各状态、部分未知和空状态；
 - 策略切换、预览确认和过期计划；
-- 实时日志节流，避免高频事件造成 UI 卡顿；
+- 虚拟化实时日志和 VueUse 节流，确保高频事件不丢最终状态；
+- `axe-core` 基础可访问性回归；
 - 批量部分失败、取消与重试交互。
 
 ### 12.4 手工验收矩阵

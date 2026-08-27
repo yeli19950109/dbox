@@ -15,6 +15,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 async-trait = "0.1"
+atomic-write-file = "=0.3.1"
 blake3 = "1.8"
 bstr = "1"
 bytes = "1"

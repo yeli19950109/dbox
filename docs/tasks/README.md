@@ -12,6 +12,9 @@
 6. **Provider 优先于白名单。** npm/brew 的全部全局安装项均由 Provider 自动生成 Tool；catalog 只做特殊增强。
 7. **Skill 不自研。** Skill 管理只通过 `npx skills`，dbox 不读写其目录和 lock 文件。
 8. **基础设施不自研。** 命令执行、进程组、取消、PATH 修复和 executable 查找优先采用维护中的开源库；dbox 只保留领域编排和薄适配。自定义替代必须先用 ADR 证明现有库确实不满足。
+9. **前后端契约单一来源。** Rust API DTO 生成 TypeScript command/event bindings，禁止手工维护镜像 interface；生成不能替代 wire-format golden test。
+10. **前端基础设施不自研。** 路由、全局状态、测试 runner、虚拟列表和通用节流使用任务指定的维护库；dbox 只实现产品状态与交互规则。
+11. **依赖治理属于门禁。** 新依赖固定版本/feature 并记录许可证、MSRV 和平台兼容性；T16 执行许可证与 RustSec 检查。
 
 ## 状态值
 
@@ -30,7 +33,7 @@
 | T03 | [Provider 接口与注册表](03-provider-registry.md) | T02 | FakeProvider 与 capability 测试 |
 | T04 | [版本比较与状态汇总](04-version-and-status.md) | T02 | SemVer/unknown/partial 纯单测 |
 | T05 | [可选 Manifest 与 Catalog 合并](05-manifest-catalog.md) | T02、T04 | 无 manifest 仍可管理，覆盖合并测试 |
-| T06 | [设置、缓存与运行记录持久化](06-persistence.md) | T01、T02 | 临时目录、原子写入、revision 测试 |
+| T06 | [设置、缓存与运行记录持久化](06-persistence.md) | T01、T02 | 原子写入库、临时目录、revision 测试 |
 | T07 | [基于开源库的命令规格与 UpdatePlan](07-command-plan.md) | T02、T04 | argv 隔离、hash、过期计划测试 |
 | T08 | [基于开源库的命令执行适配层](08-command-executor.md) | T06、T07 | fake process 集成测试 |
 | T09 | [基于开源库的 GUI 环境与命令解析](09-environment-resolver.md) | T03、T07 | fake PATH/候选路径测试 |
@@ -39,8 +42,8 @@
 | T12 | [Catalog 增强与 Pi 示例](12-catalog-enrichment-pi.md) | T05、T10、T11 | 通用 Tool + 多组件增强测试 |
 | T13 | [刷新、检查与更新应用服务](13-application-service.md) | T03–T12 | 纯 Rust 完整用例测试 |
 | T14 | [批量队列、运行历史与恢复](14-run-queue-history.md) | T06、T08、T13 | 20 项、部分失败、中断恢复测试 |
-| T15 | [Tauri 后端 API 与事件边界](15-tauri-backend-api.md) | T09、T13、T14 | DTO/command/event 契约测试 |
-| T16 | [Rust 后端集成验收门](16-backend-acceptance-gate.md) | T01–T15 | 所有后端门禁与端到端 fixture 通过 |
+| T15 | [Tauri 后端 API 与事件边界](15-tauri-backend-api.md) | T09、T13、T14 | 生成 bindings + DTO/command/event 契约测试 |
+| T16 | [Rust 后端集成验收门](16-backend-acceptance-gate.md) | T01–T15 | 后端、依赖治理与端到端 fixture 门禁通过 |
 
 ## 图形界面与发布
 
@@ -48,7 +51,7 @@
 
 | ID | 任务 | 依赖 | 主要验收 |
 | --- | --- | --- | --- |
-| T17 | [前端壳层与类型化 API](17-frontend-foundation.md) | T16 | mock transport 与 DTO 对接 |
+| T17 | [前端壳层与类型化 API](17-frontend-foundation.md) | T16 | 标准路由/store/test + 生成 bindings 对接 |
 | T18 | [工具列表、详情与刷新界面](18-tools-ui.md) | T17 | 全量 Tool 状态展示 |
 | T19 | [更新确认、运行记录与设置界面](19-update-runs-settings-ui.md) | T14、T17、T18 | UpdatePlan 驱动完整 UI 流程 |
 | T20 | [MVP 打包、文档与发布验收](20-mvp-release.md) | T16、T18、T19 | macOS 包和验收报告 |

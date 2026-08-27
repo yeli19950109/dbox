@@ -6,10 +6,10 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use atomic_write_file::AtomicWriteFile;
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
-use uuid::Uuid;
 
 use crate::domain::{ComponentId, ProviderId, Run, RunId, StrategyId, Tool, ToolId};
 
@@ -496,36 +496,10 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
         message: "file has no parent directory".into(),
     })?;
     fs::create_dir_all(parent).map_err(|error| StoreError::io(parent, error))?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("dbox-data");
-    let temporary = parent.join(format!(".{file_name}.{}.tmp", Uuid::new_v4()));
-    let result = (|| {
-        let file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-            .map_err(|error| StoreError::io(&temporary, error))?;
-        let mut writer = BufWriter::new(file);
-        writer
-            .write_all(bytes)
-            .and_then(|()| writer.flush())
-            .map_err(|error| StoreError::io(&temporary, error))?;
-        writer
-            .get_ref()
-            .sync_all()
-            .map_err(|error| StoreError::io(&temporary, error))?;
-        fs::rename(&temporary, path).map_err(|error| StoreError::io(path, error))?;
-        File::open(parent)
-            .and_then(|directory| directory.sync_all())
-            .map_err(|error| StoreError::io(parent, error))?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
+    let mut file = AtomicWriteFile::open(path).map_err(|error| StoreError::io(path, error))?;
+    file.write_all(bytes)
+        .map_err(|error| StoreError::io(path, error))?;
+    file.commit().map_err(|error| StoreError::io(path, error))
 }
 
 #[derive(Debug)]
@@ -622,6 +596,9 @@ mod tests {
     use std::time::Duration;
     use tempfile::TempDir;
 
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     fn store() -> (TempDir, PersistenceStore) {
         let temporary = TempDir::new().unwrap();
         let paths = AppPaths::new(
@@ -687,6 +664,64 @@ mod tests {
 
         assert_eq!(store.load_settings().unwrap(), original);
         assert!(stray.exists());
+    }
+
+    #[test]
+    fn discarded_atomic_write_preserves_existing_target() {
+        let temporary = TempDir::new().unwrap();
+        let path = temporary.path().join("settings.toml");
+        fs::write(&path, b"old").unwrap();
+
+        let mut pending = AtomicWriteFile::open(&path).unwrap();
+        pending.write_all(b"new").unwrap();
+        pending.discard().unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"old");
+    }
+
+    #[test]
+    fn commit_failure_does_not_replace_non_file_target() {
+        let temporary = TempDir::new().unwrap();
+        let target = temporary.path().join("target");
+        fs::create_dir(&target).unwrap();
+
+        let error = atomic_write(&target, b"new").unwrap_err();
+
+        assert_eq!(error.kind, StoreErrorKind::Io);
+        assert!(target.is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_existing_file_mode() {
+        let temporary = TempDir::new().unwrap();
+        let path = temporary.path().join("settings.toml");
+        fs::write(&path, b"old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+        atomic_write(&path, b"new").unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_directory_rejects_atomic_write() {
+        let temporary = TempDir::new().unwrap();
+        let directory = temporary.path().join("read-only");
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o555)).unwrap();
+        let path = directory.join("settings.toml");
+
+        let result = atomic_write(&path, b"new");
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(result.unwrap_err().kind, StoreErrorKind::Io);
+        assert!(!path.exists());
     }
 
     #[test]
