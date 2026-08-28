@@ -1,6 +1,6 @@
 <template>
   <div class="app-shell">
-    <aside class="sidebar">
+    <header class="topbar">
       <RouterLink class="brand" to="/tools" aria-label="dbox 工具主页">
         <span class="brand__mark" aria-hidden="true">d</span>
         <span>
@@ -27,11 +27,11 @@
           <small>soon</small>
         </RouterLink>
       </nav>
-      <footer>
+      <div class="connection-status">
         <span class="connection-dot" :data-connected="Boolean(snapshot.snapshot)" aria-hidden="true" />
         <span>{{ snapshot.snapshot ? "后端已连接" : "等待后端" }}</span>
-      </footer>
-    </aside>
+      </div>
+    </header>
     <main id="main-content" class="main-content">
       <AppErrorBoundary>
         <RouterView />

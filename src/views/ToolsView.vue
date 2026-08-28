@@ -1,24 +1,5 @@
 <template>
   <div class="view tools-view">
-    <header class="view-header">
-      <div>
-        <p class="eyebrow">Inventory</p>
-        <h1>工具</h1>
-        <p class="view-description">
-          npm 与 Homebrew 的安装项按来源独立显示，更新判断来自后端检查结果。
-        </p>
-      </div>
-      <button
-        class="button primary"
-        type="button"
-        :disabled="store.loading"
-        @click="refreshAll"
-      >
-        <span aria-hidden="true">↻</span>
-        {{ store.loading ? "正在刷新" : "刷新全部" }}
-      </button>
-    </header>
-
     <section
       v-if="providerErrors.length"
       class="provider-warning"
@@ -74,12 +55,51 @@
       </label>
     </section>
 
+    <section
+      v-if="store.refreshing"
+      class="refresh-progress"
+      role="status"
+      aria-live="polite"
+    >
+      <div class="refresh-progress__summary">
+        <span class="spinner refresh-progress__spinner" aria-hidden="true" />
+        <div>
+          <strong>{{ refreshProgressTitle }}</strong>
+          <span>{{ refreshProgressDetail }}</span>
+        </div>
+        <span v-if="refreshProgressTotal" class="refresh-progress__count">
+          {{ refreshProgressPosition }} / {{ refreshProgressTotal }}
+        </span>
+      </div>
+      <div
+        class="refresh-progress__track"
+        :data-indeterminate="!refreshProgressTotal"
+        role="progressbar"
+        aria-label="刷新工具进度"
+        aria-valuemin="0"
+        :aria-valuemax="refreshProgressTotal || undefined"
+        :aria-valuenow="refreshProgressTotal ? refreshProgressCompleted : undefined"
+        :aria-valuetext="refreshProgressDetail"
+      >
+        <span :style="refreshProgressBarStyle" />
+      </div>
+    </section>
+
     <div class="results-bar">
       <span>
         <strong>{{ filteredRecords.length }}</strong> / {{ store.toolRecords.length }} 项
       </span>
       <span v-if="lastChecked">上次检查：{{ lastChecked }}</span>
       <div class="provider-refreshes" aria-label="按 Provider 刷新">
+        <button
+          type="button"
+          class="button primary compact"
+          :disabled="store.loading"
+          @click="refreshAll"
+        >
+          <span aria-hidden="true">↻</span>
+          {{ store.loading ? "正在刷新" : "刷新全部" }}
+        </button>
         <button
           v-for="provider in providers"
           :key="provider"
@@ -117,6 +137,7 @@
         <div
           v-for="virtualRow in virtualRows"
           :key="filteredRecords[virtualRow.index]?.tool.id"
+          :ref="measureVirtualRow"
           :data-index="virtualRow.index"
           class="virtual-list__row"
           :style="{ transform: `translateY(${virtualRow.start}px)` }"
@@ -238,7 +259,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch, type ComponentPublicInstance } from "vue";
 import { useDebounceFn } from "@vueuse/core";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import { useRouter } from "vue-router";
@@ -282,6 +303,32 @@ const providerErrors = computed(
   () => store.snapshot?.providers.filter((provider) => provider.errors.length) ?? [],
 );
 const lastChecked = computed(() => formatDate(store.snapshot?.refreshedAt));
+const refreshProgressTotal = computed(() => store.currentRefreshProgress?.total ?? 0);
+const refreshProgressCompleted = computed(
+  () => store.currentRefreshProgress?.completed ?? 0,
+);
+const refreshProgressPosition = computed(() =>
+  refreshProgressTotal.value
+    ? Math.min(refreshProgressCompleted.value + 1, refreshProgressTotal.value)
+    : 0,
+);
+const refreshProgressTitle = computed(() =>
+  store.currentRefreshProgress?.providerId
+    ? `正在检查 ${store.currentRefreshProgress.providerId}`
+    : "正在准备刷新",
+);
+const refreshProgressDetail = computed(() =>
+  refreshProgressTotal.value
+    ? `正在处理第 ${refreshProgressPosition.value} 个，共 ${refreshProgressTotal.value} 个 Provider`
+    : "正在连接后端并准备检查 Provider…",
+);
+const refreshProgressBarStyle = computed(() => {
+  if (!refreshProgressTotal.value) return undefined;
+  const percent = Math.round(
+    (refreshProgressCompleted.value / refreshProgressTotal.value) * 100,
+  );
+  return { width: `${Math.max(6, percent)}%` };
+});
 
 const filteredRecords = computed(() =>
   store.toolRecords.filter((record) => {
@@ -332,12 +379,16 @@ const virtualizer = useVirtualizer(
   computed(() => ({
     count: filteredRecords.value.length,
     getScrollElement: () => scrollElement.value,
-    estimateSize: () => 280,
+    estimateSize: () => 210,
     overscan: 5,
     initialRect: { width: 900, height: 720 },
   })),
 );
 const virtualRows = computed(() => virtualizer.value.getVirtualItems());
+
+function measureVirtualRow(element: Element | ComponentPublicInstance | null): void {
+  if (element instanceof Element) virtualizer.value.measureElement(element);
+}
 
 function key(record: ToolRecord, componentId: string): string {
   return `${record.tool.id}\u0000${componentId}`;

@@ -102,4 +102,37 @@ describe("ToolsView", () => {
     });
     wrapper.unmount();
   });
+
+  it("shows Provider-level refresh progress", async () => {
+    const mock = createMockTransport();
+    setTransportForTests(mock.transport);
+    const store = useSnapshotStore();
+    store.acceptSnapshot(snapshotWithTools());
+    store.refreshing = true;
+    store.applyRefreshProgress({
+      requestId: "refresh-1",
+      sequence: "1",
+      phase: "progress",
+      message: "checking npm-global",
+      providerId: "npm-global",
+      completed: 1,
+      total: 2,
+    });
+    const router = testRouter();
+    await router.push("/tools");
+    await router.isReady();
+
+    const wrapper = mount(ToolsView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(wrapper.get(".refresh-progress").text()).toContain("正在检查 npm-global");
+    expect(wrapper.get(".refresh-progress").text()).toContain("2 / 2");
+    const progressbar = wrapper.get('[role="progressbar"]');
+    expect(progressbar.attributes("aria-valuenow")).toBe("1");
+    expect(progressbar.attributes("aria-valuemax")).toBe("2");
+    wrapper.unmount();
+  });
 });

@@ -14,9 +14,8 @@ class ResizeObserverStub implements ResizeObserver {
 
   disconnect(): void {}
   observe(target: Element): void {
-    // TanStack can use the fixed estimate for rows; only the scroll container
-    // needs a deterministic test rect. Real browsers report row resize async.
-    if (target.classList.contains("virtual-list__row")) return;
+    // Report deterministic container and row sizes. The tool list measures
+    // rendered rows so cards with different content stay tightly spaced.
     const contentRect = target.getBoundingClientRect();
     this.callback(
       [

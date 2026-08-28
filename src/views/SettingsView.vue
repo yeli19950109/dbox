@@ -1,16 +1,5 @@
 <template>
   <div class="view settings-view">
-    <header class="view-header">
-      <div>
-        <p class="eyebrow">Configuration</p>
-        <h1>设置</h1>
-        <p class="view-description">设置以 revision 保护并发写入；冲突时不会覆盖当前编辑内容。</p>
-      </div>
-      <span v-if="settings.document" class="revision-chip">
-        revision {{ shortRevision(settings.document.revision) }}
-      </span>
-    </header>
-
     <AppLoading v-if="settings.loading && !draft" label="正在读取设置…" />
     <div v-else-if="loadError" class="inline-error" role="alert">
       <span>{{ loadError }}</span>
@@ -119,6 +108,9 @@
         </div>
       </div>
       <div class="form-actions">
+        <span v-if="settings.document" class="revision-chip">
+          revision {{ shortRevision(settings.document.revision) }}
+        </span>
         <button
           class="button primary"
           data-testid="settings-save"

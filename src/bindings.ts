@@ -188,13 +188,16 @@ export type ProviderStatusDto = {
 	detail: string | null,
 };
 
-export type RefreshPhaseDto = "started" | "completed" | "failed";
+export type RefreshPhaseDto = "started" | "progress" | "completed" | "failed";
 
 export type RefreshProgressEventDto = {
 	requestId: string,
 	sequence: string,
 	phase: RefreshPhaseDto,
 	message: string,
+	providerId: string | null,
+	completed: number | null,
+	total: number | null,
 };
 
 export type RefreshRequestDto = {

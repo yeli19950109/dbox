@@ -1,15 +1,8 @@
 <template>
   <div class="view confirm-view">
-    <header class="view-header">
-      <div>
-        <p class="eyebrow">Review plans</p>
-        <h1>确认更新</h1>
-        <p class="view-description">
-          下列命令由后端 UpdatePlan 生成。确认时仅回传 plan id 与 hash。
-        </p>
-      </div>
+    <div class="view-actions">
       <RouterLink class="button secondary" to="/tools">返回工具</RouterLink>
-    </header>
+    </div>
 
     <div v-if="runs.needsRepreview" class="inline-warning" role="alert">
       <div>

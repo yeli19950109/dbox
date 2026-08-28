@@ -11,7 +11,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::{
     ApplicationError, ApplicationService, ApplicationServiceOptions, ConfirmUpdateRequest,
-    RefreshRequest, RefreshScope, ResolverApplicationEnvironment, UpdateSelection,
+    ProviderRefreshProgress, RefreshRequest, RefreshScope, ResolverApplicationEnvironment,
+    UpdateSelection,
 };
 use crate::catalog::{load_catalog_with_built_ins, CatalogError, CatalogLayer, LoadedManifest};
 use crate::domain::{ComponentId, ProviderId, RunId, StrategyId, ToolId};
@@ -60,17 +61,55 @@ impl ApiService {
 
     pub async fn refresh(&self, request: RefreshRequestDto) -> Result<SnapshotDto, ApiErrorDto> {
         let request_id = uuid::Uuid::new_v4().to_string();
-        self.emit_refresh(&request_id, RefreshPhaseDto::Started, "refresh started");
-        let request = refresh_request(request)?;
-        match self.application.refresh_tools(request).await {
+        self.emit_refresh(
+            &request_id,
+            RefreshPhaseDto::Started,
+            "refresh started",
+            None,
+        );
+        let request = match refresh_request(request) {
+            Ok(request) => request,
+            Err(error) => {
+                self.emit_refresh(&request_id, RefreshPhaseDto::Failed, &error.message, None);
+                return Err(error);
+            }
+        };
+        let mut completed = 0;
+        let mut total = 0;
+        let result = self
+            .application
+            .refresh_tools_with_progress(request, |progress| {
+                completed = progress.completed;
+                total = progress.total;
+                self.emit_refresh(
+                    &request_id,
+                    RefreshPhaseDto::Progress,
+                    &format!("checking {}", progress.provider_id),
+                    Some(&progress),
+                );
+            })
+            .await;
+        match result {
             Ok(snapshot) => {
-                self.emit_refresh(&request_id, RefreshPhaseDto::Completed, "refresh completed");
+                self.emit_refresh_counts(
+                    &request_id,
+                    RefreshPhaseDto::Completed,
+                    "refresh completed",
+                    total,
+                    total,
+                );
                 let dto = self.snapshot_from(snapshot).await?;
                 self.emit_tool_state(&dto);
                 Ok(dto)
             }
             Err(error) => {
-                self.emit_refresh(&request_id, RefreshPhaseDto::Failed, &error.to_string());
+                self.emit_refresh_counts(
+                    &request_id,
+                    RefreshPhaseDto::Failed,
+                    &error.to_string(),
+                    completed,
+                    total,
+                );
                 Err(application_error(error))
             }
         }
@@ -319,7 +358,13 @@ impl ApiService {
         Ok(SnapshotDto::from_domain(&snapshot, &installations))
     }
 
-    fn emit_refresh(&self, request_id: &str, phase: RefreshPhaseDto, message: &str) {
+    fn emit_refresh(
+        &self,
+        request_id: &str,
+        phase: RefreshPhaseDto,
+        message: &str,
+        progress: Option<&ProviderRefreshProgress>,
+    ) {
         let _ = self
             .emitter
             .emit(ApiEvent::RefreshProgress(RefreshProgressEventDto {
@@ -327,6 +372,30 @@ impl ApiService {
                 sequence: self.next_event_sequence(),
                 phase,
                 message: message.into(),
+                provider_id: progress.map(|item| item.provider_id.to_string()),
+                completed: progress.map(|item| item.completed as u32),
+                total: progress.map(|item| item.total as u32),
+            }));
+    }
+
+    fn emit_refresh_counts(
+        &self,
+        request_id: &str,
+        phase: RefreshPhaseDto,
+        message: &str,
+        completed: usize,
+        total: usize,
+    ) {
+        let _ = self
+            .emitter
+            .emit(ApiEvent::RefreshProgress(RefreshProgressEventDto {
+                request_id: request_id.into(),
+                sequence: self.next_event_sequence(),
+                phase,
+                message: message.into(),
+                provider_id: None,
+                completed: Some(completed as u32),
+                total: Some(total as u32),
             }));
     }
 

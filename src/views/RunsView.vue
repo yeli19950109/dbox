@@ -1,16 +1,5 @@
 <template>
   <div class="view runs-view">
-    <header class="view-header">
-      <div>
-        <p class="eyebrow">Execution ledger</p>
-        <h1>运行记录</h1>
-        <p class="view-description">查看实时输出、批量结果与后端保存的脱敏历史日志。</p>
-      </div>
-      <button class="button secondary" type="button" @click="reloadHistory">
-        刷新历史
-      </button>
-    </header>
-
     <section v-if="runs.orderedLiveRuns.length" class="live-strip" aria-label="实时运行队列">
       <button
         v-for="run in runs.orderedLiveRuns"
@@ -33,6 +22,9 @@
         <header>
           <h2>历史</h2>
           <span>{{ runs.history.length }} 条</span>
+          <button class="text-button" type="button" @click="reloadHistory">
+            刷新历史
+          </button>
         </header>
         <AppLoading v-if="runs.loadingHistory" label="正在读取运行历史…" />
         <AppEmptyState

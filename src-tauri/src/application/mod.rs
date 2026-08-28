@@ -133,6 +133,13 @@ pub struct RefreshRequest {
     pub force: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderRefreshProgress {
+    pub provider_id: ProviderId,
+    pub completed: usize,
+    pub total: usize,
+}
+
 impl RefreshRequest {
     pub const fn all() -> Self {
         Self {
@@ -294,6 +301,17 @@ impl ApplicationService {
         &self,
         request: RefreshRequest,
     ) -> Result<ApplicationSnapshot, ApplicationError> {
+        self.refresh_tools_with_progress(request, |_| {}).await
+    }
+
+    pub async fn refresh_tools_with_progress<F>(
+        &self,
+        request: RefreshRequest,
+        mut on_progress: F,
+    ) -> Result<ApplicationSnapshot, ApplicationError>
+    where
+        F: FnMut(ProviderRefreshProgress) + Send,
+    {
         let _operation = self.operation.lock().await;
         let settings = self.store.load_settings()?;
         let provider_ids = self.provider_ids_for_scope(&request.scope).await?;
@@ -323,7 +341,13 @@ impl ApplicationService {
         let previous_components = component_memory(&previous_snapshot.tools);
         let mut fresh_checks = BTreeMap::new();
 
-        for provider_id in &provider_ids {
+        let provider_total = provider_ids.len();
+        for (provider_index, provider_id) in provider_ids.iter().enumerate() {
+            on_progress(ProviderRefreshProgress {
+                provider_id: provider_id.clone(),
+                completed: provider_index,
+                total: provider_total,
+            });
             let registration = self
                 .registry
                 .list()

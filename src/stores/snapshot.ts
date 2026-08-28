@@ -13,8 +13,10 @@ import { useNotificationsStore } from "./notifications";
 export const useSnapshotStore = defineStore("snapshot", () => {
   const snapshot = ref<SnapshotDto | null>(null);
   const loading = ref(false);
+  const refreshing = ref(false);
   const error = ref<string | null>(null);
   const refreshProgress = ref<RefreshProgressEventDto[]>([]);
+  const currentRefreshProgress = ref<RefreshProgressEventDto | null>(null);
   const lastRefreshSequence = new Map<string, string>();
   let lastToolSequence: string | undefined;
   let initializePromise: Promise<SnapshotDto> | null = null;
@@ -46,8 +48,8 @@ export const useSnapshotStore = defineStore("snapshot", () => {
         throw reason;
       })
       .finally(() => {
-        loading.value = false;
         initializePromise = null;
+        loading.value = refreshing.value;
       });
     return initializePromise;
   }
@@ -57,7 +59,9 @@ export const useSnapshotStore = defineStore("snapshot", () => {
     const active = refreshes.get(key);
     if (active) return active;
     loading.value = true;
+    refreshing.value = true;
     error.value = null;
+    if (refreshes.size === 0) currentRefreshProgress.value = null;
     const request = unwrapCommand(
       getTransport().commands.refresh({ scope, force: true }),
     )
@@ -77,7 +81,9 @@ export const useSnapshotStore = defineStore("snapshot", () => {
       })
       .finally(() => {
         refreshes.delete(key);
-        loading.value = refreshes.size > 0;
+        refreshing.value = refreshes.size > 0;
+        loading.value = refreshing.value || initializePromise !== null;
+        if (!refreshing.value) currentRefreshProgress.value = null;
       });
     refreshes.set(key, request);
     return request;
@@ -87,6 +93,7 @@ export const useSnapshotStore = defineStore("snapshot", () => {
     const previous = lastRefreshSequence.get(event.requestId);
     if (!isNewerSequence(event.sequence, previous)) return;
     lastRefreshSequence.set(event.requestId, event.sequence);
+    currentRefreshProgress.value = event;
     refreshProgress.value = [
       event,
       ...refreshProgress.value.filter(
@@ -121,8 +128,10 @@ export const useSnapshotStore = defineStore("snapshot", () => {
   return {
     snapshot,
     loading,
+    refreshing,
     error,
     refreshProgress,
+    currentRefreshProgress,
     toolRecords,
     acceptSnapshot,
     initialize,

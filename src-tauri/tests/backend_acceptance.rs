@@ -11,8 +11,8 @@ use async_trait::async_trait;
 use chrono::Utc;
 use dbox_lib::api::{
     ApiEvent, ApiService, BufferedExecutionEventSink, CancelDispositionDto, CancelRequestDto,
-    ConfirmRequestDto, MemoryApiEventEmitter, PreviewRequestDto, RefreshRequestDto,
-    RefreshScopeDto, RunLogRequestDto, RunStateKindDto, UpdateSelectionDto,
+    ConfirmRequestDto, MemoryApiEventEmitter, PreviewRequestDto, RefreshPhaseDto,
+    RefreshRequestDto, RefreshScopeDto, RunLogRequestDto, RunStateKindDto, UpdateSelectionDto,
 };
 use dbox_lib::application::{
     ApplicationEnvironment, ApplicationService, ApplicationServiceOptions,
@@ -259,6 +259,14 @@ async fn typed_api_completes_refresh_preview_confirm_post_check_history_chain() 
     assert!(events
         .iter()
         .any(|event| matches!(event, ApiEvent::RefreshProgress(_))));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ApiEvent::RefreshProgress(progress)
+            if progress.phase == RefreshPhaseDto::Progress
+                && progress.provider_id.as_deref() == Some("acceptance")
+                && progress.completed == Some(0)
+                && progress.total == Some(1)
+    )));
     assert!(events
         .iter()
         .any(|event| matches!(event, ApiEvent::RunOutput(_))));

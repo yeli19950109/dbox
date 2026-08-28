@@ -15,6 +15,7 @@ use super::dto::run_status_name;
 #[serde(rename_all = "snake_case")]
 pub enum RefreshPhaseDto {
     Started,
+    Progress,
     Completed,
     Failed,
 }
@@ -27,6 +28,9 @@ pub struct RefreshProgressEventDto {
     pub sequence: String,
     pub phase: RefreshPhaseDto,
     pub message: String,
+    pub provider_id: Option<String>,
+    pub completed: Option<u32>,
+    pub total: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]

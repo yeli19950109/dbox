@@ -93,33 +93,33 @@ pre {
 
 .app-shell {
   min-height: 100vh;
-  display: grid;
-  grid-template-columns: 224px minmax(0, 1fr);
 }
 
-.sidebar {
-  position: fixed;
-  inset: 0 auto 0 0;
+.topbar {
+  position: sticky;
+  top: 0;
   z-index: 20;
-  width: 224px;
-  display: flex;
-  flex-direction: column;
-  padding: 28px 18px 20px;
-  border-right: 1px solid var(--line);
-  background: rgb(12 18 24 / 92%);
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 28px;
+  padding: 0 clamp(18px, 3vw, 44px);
+  border-bottom: 1px solid var(--line);
+  background: rgb(12 18 24 / 94%);
   backdrop-filter: blur(18px);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 10px 28px;
+  gap: 10px;
+  padding-right: 6px;
 }
 
 .brand__mark {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   display: grid;
   place-items: center;
   border-radius: 10px 10px 10px 3px;
@@ -146,42 +146,50 @@ pre {
   text-transform: uppercase;
 }
 
-.sidebar nav {
-  display: grid;
-  gap: 5px;
+.topbar nav {
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
-.sidebar nav a {
-  min-height: 44px;
-  display: grid;
-  grid-template-columns: 24px 1fr auto;
+.topbar nav::-webkit-scrollbar {
+  display: none;
+}
+
+.topbar nav a {
+  position: relative;
+  min-height: 64px;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  border-radius: 10px;
+  gap: 7px;
+  padding: 0 16px;
   color: var(--muted);
   font-size: 14px;
   font-weight: 600;
+  white-space: nowrap;
   transition: 140ms ease;
 }
 
-.sidebar nav a:hover {
+.topbar nav a:hover {
   color: var(--text);
-  background: var(--panel);
+  background: rgb(23 35 45 / 58%);
 }
 
-.sidebar nav a.router-link-active {
+.topbar nav a.router-link-active {
   color: var(--text);
-  background: var(--panel-raised);
-  box-shadow: inset 3px 0 var(--accent);
+  background: linear-gradient(to top, rgb(93 225 194 / 10%), transparent 72%);
+  box-shadow: inset 0 -3px var(--accent);
 }
 
-.sidebar nav a > span {
+.topbar nav a > span {
   color: var(--accent);
-  font-size: 19px;
+  font-size: 17px;
 }
 
-.sidebar nav a small {
+.topbar nav a small {
   padding: 2px 5px;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -190,14 +198,13 @@ pre {
   text-transform: uppercase;
 }
 
-.sidebar > footer {
-  margin-top: auto;
+.connection-status {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px;
   color: var(--quiet);
-  font-size: 11px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .connection-dot,
@@ -233,37 +240,20 @@ pre {
 }
 
 .main-content {
-  grid-column: 2;
   min-width: 0;
 }
 
 .view {
   width: min(1440px, 100%);
-  min-height: 100vh;
+  min-height: calc(100vh - 64px);
   margin: 0 auto;
-  padding: 54px clamp(28px, 5vw, 78px) 80px;
+  padding: 30px clamp(28px, 5vw, 78px) 80px;
 }
 
-.view-header {
+.view-actions {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 30px;
-  margin-bottom: 34px;
-}
-
-.view-header h1 {
-  margin: 1px 0 9px;
-  font-size: clamp(32px, 4vw, 48px);
-  line-height: 1.08;
-  letter-spacing: -0.045em;
-}
-
-.view-description {
-  max-width: 660px;
-  margin: 0;
-  color: var(--muted);
-  font-size: 14px;
+  justify-content: flex-end;
+  margin-bottom: 16px;
 }
 
 .eyebrow {
@@ -379,6 +369,17 @@ pre {
   letter-spacing: 0.06em;
 }
 
+.toolbar label:not(.check-control) {
+  font-size: 14px;
+}
+
+.toolbar input[type="search"],
+.toolbar select {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: normal;
+}
+
 input[type="text"],
 input[type="search"],
 input[type="number"],
@@ -438,8 +439,79 @@ input[type="checkbox"] {
   align-items: center;
   gap: 7px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 600;
   white-space: nowrap;
+}
+
+.refresh-progress {
+  display: grid;
+  gap: 10px;
+  padding: 13px 15px;
+  margin-top: 12px;
+  border: 1px solid rgb(93 225 194 / 28%);
+  border-radius: 10px;
+  background: rgb(17 39 43 / 62%);
+}
+
+.refresh-progress__summary {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.refresh-progress__summary > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.refresh-progress__summary strong {
+  font-size: 14px;
+}
+
+.refresh-progress__summary div > span,
+.refresh-progress__count {
+  color: var(--muted);
+  font: 400 12px/1.4 "DM Mono", monospace;
+}
+
+.refresh-progress__spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.refresh-progress__count {
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.refresh-progress__track {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(61 80 96 / 65%);
+}
+
+.refresh-progress__track > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  box-shadow: 0 0 10px rgb(93 225 194 / 35%);
+  transition: width 180ms ease;
+}
+
+.refresh-progress__track[data-indeterminate="true"] > span {
+  width: 34%;
+  animation: refresh-indeterminate 1.1s ease-in-out infinite;
+}
+
+@keyframes refresh-indeterminate {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(300%); }
 }
 
 .results-bar {
@@ -448,7 +520,7 @@ input[type="checkbox"] {
   align-items: center;
   gap: 18px;
   color: var(--quiet);
-  font: 400 11px/1.4 "DM Mono", monospace;
+  font: 400 14px/1.4 "DM Mono", monospace;
 }
 
 .results-bar strong {
@@ -533,8 +605,11 @@ input[type="checkbox"] {
   width: 100%;
 }
 
+.tool-virtual-list .virtual-list__row {
+  padding-bottom: 12px;
+}
+
 .tool-card {
-  margin-bottom: 12px;
   padding: 20px 21px 14px;
   border: 1px solid var(--line);
   border-radius: 13px;
@@ -631,7 +706,7 @@ input[type="checkbox"] {
   align-items: center;
   gap: 10px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .component-row + .component-row {
@@ -655,7 +730,7 @@ input[type="checkbox"] {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr);
   gap: 4px;
-  font: 400 10px/1.4 "DM Mono", monospace;
+  font: 400 14px/1.4 "DM Mono", monospace;
 }
 
 .version-pair strong {
@@ -675,7 +750,11 @@ input[type="checkbox"] {
   gap: 15px;
   padding-top: 12px;
   color: var(--quiet);
-  font: 400 9px/1.4 "DM Mono", monospace;
+  font: 400 12px/1.4 "DM Mono", monospace;
+}
+
+.results-bar .text-button {
+  font-size: 14px;
 }
 
 .tool-card__footer .text-button {
@@ -1044,6 +1123,10 @@ input[type="checkbox"] {
   font: 400 10px/1 "DM Mono", monospace;
 }
 
+.history-panel > header .text-button {
+  margin-left: auto;
+}
+
 .history-list {
   max-height: 680px;
   overflow-y: auto;
@@ -1218,10 +1301,6 @@ input[type="checkbox"] {
   gap: 16px;
 }
 
-.settings-view .view-header {
-  margin-bottom: 18px;
-}
-
 .settings-card {
   padding: 22px;
   border: 1px solid var(--line);
@@ -1304,6 +1383,11 @@ input[type="checkbox"] {
   gap: 10px;
 }
 
+.form-actions .revision-chip {
+  align-self: center;
+  margin-right: auto;
+}
+
 .form-actions.split {
   margin-top: 14px;
 }
@@ -1323,7 +1407,7 @@ input[type="checkbox"] {
 .notifications {
   position: fixed;
   z-index: 80;
-  top: 20px;
+  top: 80px;
   right: 20px;
   width: min(390px, calc(100vw - 40px));
   display: grid;
@@ -1382,71 +1466,50 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 760px) {
-  .app-shell {
-    display: block;
-  }
-
-  .sidebar {
-    position: sticky;
-    top: 0;
-    width: 100%;
-    height: auto;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    align-items: center;
-    padding: 9px 12px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
+  .topbar {
+    min-height: 54px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 0 10px;
   }
 
   .brand {
-    padding: 0;
+    padding-right: 0;
   }
 
   .brand > span:last-child,
-  .sidebar > footer,
-  .sidebar nav a small {
+  .topbar nav a small,
+  .connection-status > span:last-child {
     display: none;
   }
 
   .brand__mark {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
+    font-size: 19px;
   }
 
-  .sidebar nav {
-    display: flex;
-    justify-content: flex-end;
+  .topbar nav {
     gap: 2px;
   }
 
-  .sidebar nav a {
-    min-height: 36px;
-    display: flex;
-    padding: 0 8px;
-    font-size: 10px;
+  .topbar nav a {
+    min-height: 54px;
+    padding: 0 10px;
+    font-size: 12px;
   }
 
-  .sidebar nav a > span {
+  .topbar nav a > span {
     font-size: 15px;
   }
 
-  .main-content {
-    min-width: 0;
+  .connection-status {
+    gap: 0;
   }
 
   .view {
-    min-height: auto;
-    padding: 30px 16px 60px;
-  }
-
-  .view-header {
-    flex-direction: column;
-    margin-bottom: 24px;
-  }
-
-  .view-header h1 {
-    font-size: 34px;
+    min-height: calc(100vh - 54px);
+    padding: 20px 16px 60px;
   }
 
   .toolbar,
@@ -1467,6 +1530,10 @@ input[type="checkbox"] {
   .provider-refreshes {
     width: 100%;
     margin-left: 0;
+  }
+
+  .notifications {
+    top: 66px;
   }
 
   .component-row {
