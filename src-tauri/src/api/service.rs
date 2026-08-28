@@ -55,6 +55,50 @@ impl ApiService {
         }
     }
 
+    pub fn production(
+        paths: AppPaths,
+        emitter: Arc<dyn ApiEventEmitter>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let store = Arc::new(PersistenceStore::new(paths));
+        let settings = store.load_settings()?;
+        let provider_resolver = EnvironmentResolver::from_current_process()?;
+        let npm_path = resolve_provider_program(
+            &provider_resolver,
+            "npm",
+            settings.value.executable_overrides.get("npm"),
+            store.paths().data_dir.join("unavailable/npm"),
+        );
+        let brew_path = resolve_provider_program(
+            &provider_resolver,
+            "brew",
+            settings.value.executable_overrides.get("brew"),
+            store.paths().data_dir.join("unavailable/brew"),
+        );
+        let mut registry = ProviderRegistry::new();
+        registry.register(Arc::new(NpmGlobalProvider::new(npm_path)))?;
+        registry.register(Arc::new(HomebrewProvider::new(brew_path)))?;
+        let catalog = load_catalog_with_built_ins(store.paths().manifests_dir());
+        let event_sink = Arc::new(BufferedExecutionEventSink::new(
+            Arc::clone(&emitter),
+            32,
+            Duration::from_millis(50),
+        ));
+        let executor = CommandExecutor::new(Some(Arc::clone(&store)), event_sink, 64 * 1024);
+        let environment = Arc::new(ResolverApplicationEnvironment::new(
+            EnvironmentResolver::from_current_process()?,
+        ));
+        let application = Arc::new(ApplicationService::with_catalog_errors(
+            Arc::new(registry),
+            catalog.catalog,
+            catalog.errors,
+            Arc::clone(&store),
+            executor,
+            environment,
+            ApplicationServiceOptions::default(),
+        )?);
+        Ok(Self::new(application, store, emitter))
+    }
+
     pub async fn snapshot(&self) -> Result<SnapshotDto, ApiErrorDto> {
         self.snapshot_from(self.application.snapshot().await).await
     }
@@ -430,50 +474,9 @@ impl ApiState {
     pub fn production(
         handle: &tauri::AppHandle<tauri::Wry>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let paths = AppPaths::from_tauri(handle.path())?;
-        let store = Arc::new(PersistenceStore::new(paths));
-        let settings = store.load_settings()?;
-        let provider_resolver = EnvironmentResolver::from_current_process()?;
-        let npm_path = resolve_provider_program(
-            &provider_resolver,
-            "npm",
-            settings.value.executable_overrides.get("npm"),
-            store.paths().data_dir.join("unavailable/npm"),
-        );
-        let brew_path = resolve_provider_program(
-            &provider_resolver,
-            "brew",
-            settings.value.executable_overrides.get("brew"),
-            store.paths().data_dir.join("unavailable/brew"),
-        );
-        let mut registry = ProviderRegistry::new();
-        registry.register(Arc::new(NpmGlobalProvider::new(npm_path)))?;
-        registry.register(Arc::new(HomebrewProvider::new(brew_path)))?;
-        let catalog = load_catalog_with_built_ins(store.paths().manifests_dir());
         let emitter: Arc<dyn ApiEventEmitter> = Arc::new(TauriApiEventEmitter::new(handle.clone()));
-        let event_sink = Arc::new(BufferedExecutionEventSink::new(
-            Arc::clone(&emitter),
-            32,
-            Duration::from_millis(50),
-        ));
-        let executor = CommandExecutor::new(Some(Arc::clone(&store)), event_sink, 64 * 1024);
-        let environment = Arc::new(ResolverApplicationEnvironment::new(
-            EnvironmentResolver::from_current_process()?,
-        ));
-        let application = Arc::new(ApplicationService::with_catalog_errors(
-            Arc::new(registry),
-            catalog.catalog,
-            catalog.errors,
-            Arc::clone(&store),
-            executor,
-            environment,
-            ApplicationServiceOptions::default(),
-        )?);
-        Ok(Self::new(Arc::new(ApiService::new(
-            application,
-            store,
-            emitter,
-        ))))
+        let paths = AppPaths::from_tauri(handle.path())?;
+        Ok(Self::new(Arc::new(ApiService::production(paths, emitter)?)))
     }
 }
 

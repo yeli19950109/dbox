@@ -54,4 +54,21 @@ describe("SettingsView revision conflicts", () => {
     expect(wrapper.text()).toContain("remote-2");
     wrapper.unmount();
   });
+
+  it("omits blank executable overrides when saving an unchanged form", async () => {
+    const mock = createMockTransport();
+    setTransportForTests(mock.transport);
+    const wrapper = mount(SettingsView, { attachTo: document.body });
+    await flushPromises();
+
+    await wrapper.get('[data-testid="settings-save"]').trigger("click");
+    await flushPromises();
+
+    expect(mock.transport.commands.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        settings: expect.objectContaining({ executableOverrides: {} }),
+      }),
+    );
+    wrapper.unmount();
+  });
 });

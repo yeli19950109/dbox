@@ -52,6 +52,37 @@ impl AppPaths {
         Ok(Self::new(config_dir, data_dir, log_dir))
     }
 
+    #[cfg(all(debug_assertions, feature = "dev-http"))]
+    pub fn from_desktop_identifier(identifier: &str) -> Result<Self, StoreError> {
+        let config_dir = dirs::config_dir()
+            .ok_or_else(|| {
+                StoreError::path_resolution("config_dir", "directory is unavailable".into())
+            })?
+            .join(identifier);
+        let data_dir = dirs::data_dir()
+            .ok_or_else(|| {
+                StoreError::path_resolution("data_dir", "directory is unavailable".into())
+            })?
+            .join(identifier);
+
+        #[cfg(target_os = "macos")]
+        let log_dir = dirs::home_dir()
+            .ok_or_else(|| {
+                StoreError::path_resolution("home_dir", "directory is unavailable".into())
+            })?
+            .join("Library/Logs")
+            .join(identifier);
+        #[cfg(not(target_os = "macos"))]
+        let log_dir = dirs::data_local_dir()
+            .ok_or_else(|| {
+                StoreError::path_resolution("local_data_dir", "directory is unavailable".into())
+            })?
+            .join(identifier)
+            .join("logs");
+
+        Ok(Self::new(config_dir, data_dir, log_dir))
+    }
+
     pub fn settings_file(&self) -> PathBuf {
         self.config_dir.join("settings.toml")
     }

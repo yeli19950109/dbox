@@ -1,3 +1,6 @@
+#[cfg(all(not(debug_assertions), feature = "dev-http"))]
+compile_error!("the dev-http feature is restricted to debug builds");
+
 pub mod api;
 pub mod application;
 pub mod catalog;

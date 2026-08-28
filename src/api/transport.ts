@@ -1,13 +1,19 @@
+import { isTauri } from "@tauri-apps/api/core";
 import { commands, events } from "../bindings";
 import type { ApiErrorDto } from "../bindings";
+import { httpTransport } from "./httpTransport";
 
 export type ApiTransport = {
   commands: typeof commands;
   events: typeof events;
 };
 
-const productionTransport: ApiTransport = { commands, events };
-let activeTransport = productionTransport;
+const tauriTransport: ApiTransport = { commands, events };
+let activeTransport = defaultTransport();
+
+export function defaultTransport(): ApiTransport {
+  return isTauri() ? tauriTransport : httpTransport;
+}
 
 export class BackendError extends Error {
   readonly code: ApiErrorDto["code"];
@@ -32,7 +38,7 @@ export function setTransportForTests(transport: ApiTransport): void {
 }
 
 export function resetTransport(): void {
-  activeTransport = productionTransport;
+  activeTransport = defaultTransport();
 }
 
 export function errorMessage(reason: unknown, fallback: string): string {

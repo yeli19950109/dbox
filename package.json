@@ -7,6 +7,7 @@
     "bindings:generate": "cargo run --manifest-path src-tauri/Cargo.toml --bin export-bindings -- src/bindings.ts",
     "bindings:check": "npm run bindings:generate && git diff --exit-code -- src/bindings.ts",
     "dev": "vite",
+    "dev:http": "node scripts/dev-http.mjs",
     "build": "vue-tsc --noEmit && vite build",
     "test": "vitest run",
     "test:watch": "vitest",

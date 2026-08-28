@@ -1,4 +1,6 @@
 mod commands;
+#[cfg(all(debug_assertions, feature = "dev-http"))]
+mod dev_http;
 mod dto;
 mod events;
 mod service;
@@ -9,6 +11,8 @@ use specta_typescript::Typescript;
 use tauri_specta::{collect_commands, collect_events, Builder};
 
 pub use commands::*;
+#[cfg(all(debug_assertions, feature = "dev-http"))]
+pub use dev_http::*;
 pub use dto::*;
 pub use events::*;
 pub use service::*;

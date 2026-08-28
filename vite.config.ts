@@ -23,6 +23,11 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: host || false,
+    proxy: {
+      "/__dbox_http": {
+        target: "http://127.0.0.1:1430",
+      },
+    },
     hmr: host
       ? {
           protocol: "ws",

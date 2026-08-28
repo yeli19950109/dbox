@@ -205,6 +205,16 @@ function cloneSettings(value: SettingsValueDto): SettingsValueDto {
   return copy;
 }
 
+function settingsForSave(value: SettingsValueDto): SettingsValueDto {
+  const copy = structuredClone(toRaw(value));
+  copy.executableOverrides = Object.fromEntries(
+    Object.entries(copy.executableOverrides)
+      .map(([name, path]) => [name, path.trim()] as const)
+      .filter(([, path]) => path.length > 0),
+  );
+  return copy;
+}
+
 async function loadSettings(preserveDraft = false): Promise<void> {
   loadError.value = null;
   try {
@@ -219,7 +229,7 @@ async function persistSettings(): Promise<void> {
   if (!draft.value) throw new Error("设置草稿尚未加载");
   settingsConflict.value = false;
   try {
-    const document = await settings.save(cloneSettings(draft.value));
+    const document = await settings.save(settingsForSave(draft.value));
     draft.value = cloneSettings(document.settings);
     notifications.push("success", "设置已保存");
   } catch (reason) {

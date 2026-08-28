@@ -6,11 +6,20 @@ edition = "2021"
 publish = false
 default-run = "dbox"
 
+[features]
+default = []
+dev-http = ["dep:axum", "dep:dirs", "dep:tokio-stream", "tokio/net"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
 name = "dbox_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "dev-http"
+path = "src/bin/dev-http.rs"
+required-features = ["dev-http"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -18,10 +27,12 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 async-trait = "0.1"
 atomic-write-file = "=0.3.1"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"], optional = true }
 blake3 = "1.8"
 bstr = "1"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
+dirs = { version = "6", optional = true }
 fix-path-env = { version = "0.0.0", git = "https://github.com/tauri-apps/fix-path-env-rs", rev = "c4c45d503ea115a839aae718d02f79e7c7f0f673" }
 process-wrap = { version = "10.0.0", features = ["tokio1"] }
 regex = "1"
@@ -39,6 +50,7 @@ strip-ansi-escapes = "0.2"
 thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }
+tokio-stream = { version = "0.1", features = ["sync"], optional = true }
 toml = "0.9"
 tracing = "0.1"
 uuid = { version = "1", features = ["serde", "v4"] }
@@ -46,3 +58,4 @@ which = "8"
 
 [dev-dependencies]
 tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
