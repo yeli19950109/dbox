@@ -28,9 +28,12 @@ case "$1" in
     fi
     ;;
   list)
-    if [ -f "$fixture_dir/lists/$4.txt" ]; then
-      command cat "$fixture_dir/lists/$4.txt"
-    fi
+    shift 3
+    for formula in "$@"; do
+      if [ -f "$fixture_dir/lists/$formula.txt" ]; then
+        command cat "$fixture_dir/lists/$formula.txt"
+      fi
+    done
     if [ -f "$fixture_dir/list.exit" ]; then
       exit "$(command cat "$fixture_dir/list.exit")"
     fi

@@ -67,6 +67,32 @@ describe("ToolsView", () => {
     wrapper.unmount();
   });
 
+  it("puts tools with updates first and preserves source order within each group", async () => {
+    const snapshot = snapshotWithTools(3);
+    snapshot.tools = [snapshot.tools[1]!, snapshot.tools[2]!, snapshot.tools[0]!];
+    const mock = createMockTransport({
+      snapshot: vi.fn(() => Promise.resolve({ status: "ok", data: snapshot })),
+    });
+    setTransportForTests(mock.transport);
+    useSnapshotStore().acceptSnapshot(snapshot);
+    const router = testRouter();
+    await router.push("/tools");
+    await router.isReady();
+
+    const wrapper = mount(ToolsView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(wrapper.findAll(".tool-card h2").map((heading) => heading.text())).toEqual([
+      "Shared CLI",
+      "Tool 1",
+      "Tool 2",
+    ]);
+    wrapper.unmount();
+  });
+
   it("supports filters, hidden state, keyboard focus and provider-scoped refresh", async () => {
     vi.useFakeTimers();
     const snapshot = snapshotWithTools(12);
@@ -100,6 +126,35 @@ describe("ToolsView", () => {
       scope: { scope: "provider", providerId: "npm" },
       force: true,
     });
+    wrapper.unmount();
+  });
+
+  it("includes direct update_available tools when hasUpdates is null", async () => {
+    const snapshot = snapshotWithTools(2);
+    snapshot.tools[0]!.status.hasUpdates = null;
+    const mock = createMockTransport({
+      snapshot: vi.fn(() => Promise.resolve({ status: "ok", data: snapshot })),
+    });
+    setTransportForTests(mock.transport);
+    useSnapshotStore().acceptSnapshot(snapshot);
+    const router = testRouter();
+    await router.push("/tools");
+    await router.isReady();
+
+    const wrapper = mount(ToolsView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+    await wrapper.findAll("select")[0]!.setValue("updates");
+
+    expect(wrapper.text()).toContain("1 / 2 项");
+    expect(wrapper.text()).toContain("Shared CLI");
+    const updateSelection = wrapper.get('input[aria-label*="全部更新"]');
+    await updateSelection.setValue(true);
+    expect(wrapper.get(".selection-bar").text()).toContain("已选择 1 个 Component");
+    await updateSelection.setValue(false);
+    expect(wrapper.find(".selection-bar").exists()).toBe(false);
     wrapper.unmount();
   });
 

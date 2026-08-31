@@ -109,7 +109,10 @@ fn installed_info() -> serde_json::Value {
         "formulae": [
             {
                 "name": "shared",
-                "installed": [{ "version": "1.0.0" }],
+                "installed": [{
+                    "version": "1.0.0",
+                    "installed_on_request": true
+                }],
                 "linked_keg": "1.0.0",
                 "pinned": false,
                 "keg_only": false,
@@ -134,12 +137,24 @@ fn installed_info() -> serde_json::Value {
                 "keg_only": true,
                 "deprecated": true,
                 "disabled": false
+            },
+            {
+                "name": "dependency-only",
+                "installed": [{
+                    "version": "3.0.0",
+                    "installed_on_request": false
+                }],
+                "linked_keg": "3.0.0",
+                "pinned": false,
+                "keg_only": false,
+                "deprecated": false,
+                "disabled": false
             }
         ],
         "casks": [
             {
                 "token": "shared",
-                "installed": ["5.0.0"],
+                "installed": "5.0.0",
                 "deprecated": false,
                 "disabled": false,
                 "artifacts": [{ "binary": ["Shared.app/Contents/MacOS/shared-cask", { "target": "shared-cli" }] }]
@@ -211,8 +226,26 @@ async fn fake_brew_completes_probe_scan_check_and_precise_formula_cask_plans() {
     assert_eq!(formula.id.as_str(), "homebrew-formula:shared");
     assert_eq!(cask.id.as_str(), "homebrew-cask:shared");
     assert_ne!(formula.id, cask.id);
+    assert_eq!(cask.installed_version.as_ref().unwrap().raw(), "5.0.0");
     assert_eq!(formula.executables[0].name, "shared");
     assert_eq!(cask.executables[0].name, "shared-cli");
+    let list_calls: Vec<_> = fake
+        .calls()
+        .into_iter()
+        .filter(|call| call.starts_with("[<list><--formula><-->"))
+        .collect();
+    assert_eq!(
+        list_calls.len(),
+        1,
+        "formula files are enumerated in one batch"
+    );
+    assert!(list_calls[0].contains("<shared>"));
+    assert!(list_calls[0].contains("<pinned-tool>"));
+    assert!(list_calls[0].contains("<multi-keg>"));
+    assert!(!list_calls[0].contains("<dependency-only>"));
+    assert!(installations
+        .iter()
+        .all(|installation| installation.package.name != "dependency-only"));
     assert!(installations
         .iter()
         .find(|installation| installation.package.name == "no-cli")
@@ -232,6 +265,14 @@ async fn fake_brew_completes_probe_scan_check_and_precise_formula_cask_plans() {
         checks
             .iter()
             .find(|check| check.installation_id == formula.id)
+            .unwrap()
+            .status,
+        ComponentStatus::UpdateAvailable
+    ));
+    assert!(matches!(
+        checks
+            .iter()
+            .find(|check| check.installation_id == cask.id)
             .unwrap()
             .status,
         ComponentStatus::UpdateAvailable

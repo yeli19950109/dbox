@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { SnapshotDto } from "../bindings";
 import { snapshotWithTools } from "../test/fixtures";
-import { mapToolRecords, updateableComponents } from "./presentation";
+import {
+  mapToolRecords,
+  toolHasUpdates,
+  updateableComponents,
+} from "./presentation";
 
 describe("generated DTO presentation mapping", () => {
   it("joins installations by generated ids and keeps equal names from different providers separate", () => {
@@ -25,5 +29,13 @@ describe("generated DTO presentation mapping", () => {
     expect(records).toHaveLength(6);
     expect(unknown).toBeDefined();
     expect(updateableComponents(unknown!.tool)).toEqual([]);
+  });
+
+  it("recognizes a direct update_available status when aggregate metadata is null", () => {
+    const update = snapshotWithTools(1).tools[0]!;
+    update.status.hasUpdates = null;
+
+    expect(update.status.status).toBe("update_available");
+    expect(toolHasUpdates(update)).toBe(true);
   });
 });

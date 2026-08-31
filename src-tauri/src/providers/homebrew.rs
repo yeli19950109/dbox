@@ -274,7 +274,7 @@ impl HomebrewProvider {
             .push(diagnostic);
     }
 
-    async fn formula_installation(
+    fn formula_installation(
         &self,
         environment: &BrewEnvironment,
         value: &Value,
@@ -301,7 +301,6 @@ impl HomebrewProvider {
                 .join(formula_basename(&name))
                 .join(version)
         });
-        installation.set_executables(self.formula_executables(&name).await);
         self.packages
             .lock()
             .expect("Homebrew package mutex is not poisoned")
@@ -341,14 +340,26 @@ impl HomebrewProvider {
         Some(installation)
     }
 
-    async fn formula_executables(&self, name: &str) -> Vec<Executable> {
-        let args = ["list", "--formula", "--", name];
+    async fn formula_executables(
+        &self,
+        environment: &BrewEnvironment,
+        installations: &[Installation],
+    ) -> BTreeMap<InstallationId, Vec<Executable>> {
+        if installations.is_empty() {
+            return BTreeMap::new();
+        }
+        let mut args = vec!["list".to_owned(), "--formula".to_owned(), "--".to_owned()];
+        args.extend(
+            installations
+                .iter()
+                .map(|installation| installation.package.name.clone()),
+        );
         let output = match self.run_brew(ProviderOperation::Scan, args).await {
             Ok(output) if output.code == Some(0) => output,
             Ok(output) => {
                 self.record_diagnostic(BrewDiagnostic {
                     installation_id: None,
-                    package: Some(name.into()),
+                    package: None,
                     code: "executables_unavailable".into(),
                     summary: format!(
                         "brew list could not enumerate executables: {}",
@@ -356,35 +367,71 @@ impl HomebrewProvider {
                     ),
                     recoverability: classify_recoverability(&output.stderr),
                 });
-                return Vec::new();
+                return BTreeMap::new();
             }
             Err(error) => {
                 self.record_diagnostic(BrewDiagnostic {
                     installation_id: None,
-                    package: Some(name.into()),
+                    package: None,
                     code: "executables_unavailable".into(),
                     summary: error.summary,
                     recoverability: error.recoverability,
                 });
-                return Vec::new();
+                return BTreeMap::new();
             }
         };
-        String::from_utf8_lossy(&output.stdout)
+        let installation_ids = installations.iter().fold(
+            BTreeMap::<String, Option<InstallationId>>::new(),
+            |mut result, installation| {
+                result
+                    .entry(formula_basename(&installation.package.name).to_owned())
+                    .and_modify(|id| *id = None)
+                    .or_insert_with(|| Some(installation.id.clone()));
+                result
+            },
+        );
+        let cellar = environment.prefix.join("Cellar");
+        let mut executables = BTreeMap::<InstallationId, Vec<Executable>>::new();
+        for path in String::from_utf8_lossy(&output.stdout)
             .lines()
             .map(str::trim)
             .map(PathBuf::from)
             .filter(|path| path.is_absolute())
-            .filter(|path| {
-                path.parent()
-                    .and_then(Path::file_name)
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|parent| matches!(parent, "bin" | "sbin"))
-            })
-            .filter_map(|path| {
-                let name = path.file_name()?.to_str()?.to_owned();
-                Some(Executable { name, path })
-            })
-            .collect()
+        {
+            let Some(parent) = path
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
+            else {
+                continue;
+            };
+            if !matches!(parent, "bin" | "sbin") {
+                continue;
+            }
+            let Some(cellar_name) = path
+                .strip_prefix(&cellar)
+                .ok()
+                .and_then(|relative| relative.components().next())
+                .and_then(|component| component.as_os_str().to_str())
+            else {
+                continue;
+            };
+            let Some(Some(installation_id)) = installation_ids.get(cellar_name) else {
+                continue;
+            };
+            let Some(name) = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+            else {
+                continue;
+            };
+            executables
+                .entry(installation_id.clone())
+                .or_default()
+                .push(Executable { name, path });
+        }
+        executables
     }
 
     fn cask_installation(
@@ -394,14 +441,7 @@ impl HomebrewProvider {
     ) -> Option<Installation> {
         let object = value.as_object()?;
         let name = package_name(object, "full_token", "token")?;
-        let versions: Vec<_> = object
-            .get("installed")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect();
+        let versions = cask_installed_versions(object);
         let disabled = truthy(object.get("disabled"));
         let deprecated = truthy(object.get("deprecated"));
         let mut installation = make_installation(&self.id, PackageKind::HomebrewCask, &name)?;
@@ -555,9 +595,13 @@ impl ToolProvider for HomebrewProvider {
         let formulae = required_array(object, "formulae", &self.id, ProviderOperation::Scan)?;
         let casks = required_array(object, "casks", &self.id, ProviderOperation::Scan)?;
         let mut installations = Vec::with_capacity(formulae.len() + casks.len());
+        let mut formula_installations = Vec::with_capacity(formulae.len());
         for formula in formulae {
-            match self.formula_installation(&environment, formula).await {
-                Some(installation) => installations.push(installation),
+            if formula_is_dependency_only(formula) {
+                continue;
+            }
+            match self.formula_installation(&environment, formula) {
+                Some(installation) => formula_installations.push(installation),
                 None => self.record_diagnostic(BrewDiagnostic {
                     installation_id: None,
                     package: None,
@@ -566,6 +610,15 @@ impl ToolProvider for HomebrewProvider {
                     recoverability: Recoverability::Permanent,
                 }),
             }
+        }
+        let mut formula_executables = self
+            .formula_executables(&environment, &formula_installations)
+            .await;
+        for mut installation in formula_installations {
+            if let Some(executables) = formula_executables.remove(&installation.id) {
+                installation.set_executables(executables);
+            }
+            installations.push(installation);
         }
         for cask in casks {
             match self.cask_installation(&environment, cask) {
@@ -891,6 +944,37 @@ fn formula_installed_versions(object: &Map<String, Value>) -> Vec<String> {
         })
         .map(str::to_owned)
         .collect()
+}
+
+fn formula_is_dependency_only(value: &Value) -> bool {
+    let Some(installed) = value
+        .as_object()
+        .and_then(|object| object.get("installed"))
+        .and_then(Value::as_array)
+    else {
+        return false;
+    };
+    !installed.is_empty()
+        && installed.iter().all(|receipt| {
+            receipt
+                .as_object()
+                .and_then(|receipt| receipt.get("installed_on_request"))
+                .and_then(Value::as_bool)
+                == Some(false)
+        })
+}
+
+fn cask_installed_versions(object: &Map<String, Value>) -> Vec<String> {
+    match object.get("installed") {
+        Some(Value::String(version)) if !version.trim().is_empty() => vec![version.clone()],
+        Some(Value::Array(versions)) => versions
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|version| !version.trim().is_empty())
+            .map(str::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn truthy(value: Option<&Value>) -> bool {

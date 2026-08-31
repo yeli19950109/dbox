@@ -37,6 +37,14 @@ export function updateableComponents(tool: ToolDto): ComponentDto[] {
   );
 }
 
+export function toolHasUpdates(tool: ToolDto): boolean {
+  return tool.status.status === "update_available" || tool.status.hasUpdates === true;
+}
+
+export function compareToolUpdatePriority(left: ToolRecord, right: ToolRecord): number {
+  return Number(toolHasUpdates(right.tool)) - Number(toolHasUpdates(left.tool));
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) return "尚未检查";
   const parsed = new Date(value);

@@ -44,7 +44,7 @@ vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(func
     : this.classList.contains("tool-virtual-list")
       ? 720
       : this.classList.contains("virtual-list__row")
-        ? 245
+        ? 58
         : 40;
   return {
     x: 0,

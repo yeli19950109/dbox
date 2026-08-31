@@ -90,16 +90,7 @@
         <strong>{{ filteredRecords.length }}</strong> / {{ store.toolRecords.length }} 项
       </span>
       <span v-if="lastChecked">上次检查：{{ lastChecked }}</span>
-      <div class="provider-refreshes" aria-label="按 Provider 刷新">
-        <button
-          type="button"
-          class="button primary compact"
-          :disabled="store.loading"
-          @click="refreshAll"
-        >
-          <span aria-hidden="true">↻</span>
-          {{ store.loading ? "正在刷新" : "刷新全部" }}
-        </button>
+      <div v-if="providers.length" class="provider-refreshes" aria-label="按 Provider 刷新">
         <button
           v-for="provider in providers"
           :key="provider"
@@ -137,7 +128,6 @@
         <div
           v-for="virtualRow in virtualRows"
           :key="filteredRecords[virtualRow.index]?.tool.id"
-          :ref="measureVirtualRow"
           :data-index="virtualRow.index"
           class="virtual-list__row"
           :style="{ transform: `translateY(${virtualRow.start}px)` }"
@@ -147,9 +137,7 @@
             :record="filteredRecords[virtualRow.index]!"
             :selected="selected"
             @details="openDetails(filteredRecords[virtualRow.index]!, $event)"
-            @toggle="toggleComponent(filteredRecords[virtualRow.index]!, $event)"
             @select-updates="selectToolUpdates(filteredRecords[virtualRow.index]!)"
-            @refresh="refreshTool(filteredRecords[virtualRow.index]!.tool.id)"
           />
         </div>
       </div>
@@ -259,7 +247,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch, type ComponentPublicInstance } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useDebounceFn } from "@vueuse/core";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import { useRouter } from "vue-router";
@@ -269,7 +257,12 @@ import ToolCard from "../components/ToolCard.vue";
 import { useRunsStore } from "../stores/runs";
 import { useSnapshotStore } from "../stores/snapshot";
 import type { ToolRecord } from "../utils/presentation";
-import { formatDate, updateableComponents } from "../utils/presentation";
+import {
+  compareToolUpdatePriority,
+  formatDate,
+  toolHasUpdates,
+  updateableComponents,
+} from "../utils/presentation";
 
 const store = useSnapshotStore();
 const runs = useRunsStore();
@@ -347,7 +340,7 @@ const filteredRecords = computed(() =>
     ) {
       return false;
     }
-    if (statusFilter.value === "updates" && record.tool.status.hasUpdates !== true) return false;
+    if (statusFilter.value === "updates" && !toolHasUpdates(record.tool)) return false;
     if (
       statusFilter.value === "unknown" &&
       record.tool.status.status !== "unknown" &&
@@ -372,40 +365,34 @@ const filteredRecords = computed(() =>
       .join(" ")
       .toLocaleLowerCase();
     return haystack.includes(search.value);
-  }),
+  }).sort(compareToolUpdatePriority),
 );
 
 const virtualizer = useVirtualizer(
   computed(() => ({
     count: filteredRecords.value.length,
     getScrollElement: () => scrollElement.value,
-    estimateSize: () => 210,
+    estimateSize: () => 58,
     overscan: 5,
     initialRect: { width: 900, height: 720 },
   })),
 );
 const virtualRows = computed(() => virtualizer.value.getVirtualItems());
 
-function measureVirtualRow(element: Element | ComponentPublicInstance | null): void {
-  if (element instanceof Element) virtualizer.value.measureElement(element);
-}
-
 function key(record: ToolRecord, componentId: string): string {
   return `${record.tool.id}\u0000${componentId}`;
 }
 
-function toggleComponent(record: ToolRecord, componentId: string): void {
-  const next = new Set(selected.value);
-  const value = key(record, componentId);
-  if (next.has(value)) next.delete(value);
-  else next.add(value);
-  selected.value = next;
-}
-
 function selectToolUpdates(record: ToolRecord): void {
   const next = new Set(selected.value);
-  for (const component of updateableComponents(record.tool)) {
-    next.add(key(record, component.id));
+  const components = updateableComponents(record.tool);
+  const allSelected = components.every((component) =>
+    next.has(key(record, component.id)),
+  );
+  for (const component of components) {
+    const value = key(record, component.id);
+    if (allSelected) next.delete(value);
+    else next.add(value);
   }
   selected.value = next;
 }
@@ -475,15 +462,8 @@ function clearFilters(): void {
 function initialize(): void {
   void store.initialize().catch(() => undefined);
 }
-function refreshAll(): void {
-  void store.refresh({ scope: "all" }).catch(() => undefined);
-}
 function refreshProvider(providerId: string): void {
   void store.refresh({ scope: "provider", providerId }).catch(() => undefined);
 }
-function refreshTool(toolId: string): void {
-  void store.refresh({ scope: "tool", toolId }).catch(() => undefined);
-}
-
 onMounted(initialize);
 </script>
