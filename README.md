@@ -19,3 +19,19 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run build
 ```
+
+## Local macOS package
+
+Build a DMG for the current Mac architecture with Tauri's bundler:
+
+```sh
+npm run tauri -- build --bundles dmg --ci --config '{"bundle":{"macOS":{"signingIdentity":"-"}}}'
+```
+
+The DMG is written to `src-tauri/target/release/bundle/dmg/`. This local build uses
+ad-hoc signing; it has no Developer ID signature or Apple notarization. Public
+distribution requires separate Apple signing and notarization credentials.
+
+Development binaries are excluded from default builds. Use `npm run bindings:generate`
+to enable the `bindings` feature for the TypeScript exporter, or `npm run dev:http`
+to enable the `dev-http` feature for the browser development bridge.
