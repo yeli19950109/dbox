@@ -522,3 +522,60 @@ async fn successful_command_with_failed_post_check_is_partial_and_not_verified()
     assert_eq!(cached.value.runs.last().unwrap().status, RunStatus::Partial);
     assert!(fixture.temporary.path().join("logs/runs").exists());
 }
+
+#[tokio::test]
+async fn restart_retains_installation_sources_and_lists_unscanned_providers() {
+    let fixture = Fixture::new();
+    let installed = installation("npm-global", PackageKind::NpmGlobal, "@scope/cli", "1.0.0");
+    let npm = FakeProvider::new(ProviderId::new("npm-global").unwrap())
+        .with_scan_result(Ok(vec![installed.clone()]));
+    let mise = FakeProvider::new(ProviderId::new("mise").unwrap());
+    let registry = || {
+        let mut registry = ProviderRegistry::new();
+        registry.register(Arc::new(npm.clone())).unwrap();
+        registry.register(Arc::new(mise.clone())).unwrap();
+        registry
+    };
+    let environment = Arc::new(FakeEnvironment::default());
+    let service = fixture.service(registry(), Catalog::default(), environment.clone());
+    let initial = service.snapshot().await;
+    assert_eq!(initial.providers.len(), 2);
+    assert!(initial
+        .providers
+        .values()
+        .all(|report| report.status.is_none()));
+    assert_eq!(npm.calls().scan, 0);
+    assert_eq!(mise.calls().probe, 0);
+    service
+        .refresh_tools(RefreshRequest::force_all())
+        .await
+        .unwrap();
+    drop(service);
+
+    let restarted = fixture.service(registry(), Catalog::default(), environment);
+    assert_eq!(restarted.installations().await, vec![installed.clone()]);
+    assert_eq!(
+        restarted.snapshot().await.tools[0].installation_ids,
+        vec![installed.id.clone()]
+    );
+    assert_eq!(
+        npm.calls().scan,
+        1,
+        "reading the cache does not run another scan"
+    );
+    restarted
+        .refresh_tools(RefreshRequest {
+            scope: RefreshScope::Provider {
+                provider_id: ProviderId::new("mise").unwrap(),
+            },
+            force: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(restarted.installations().await, vec![installed]);
+    assert_eq!(
+        restarted.snapshot().await.tools.len(),
+        1,
+        "refreshing an empty provider preserves cached tools from other sources"
+    );
+}

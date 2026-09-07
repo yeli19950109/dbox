@@ -392,3 +392,51 @@ fn refresh_scope_wire_names_are_camel_case() {
         serde_json::json!({"scope": "provider", "providerId": "npm-global"})
     );
 }
+
+#[tokio::test]
+async fn quiet_commands_flush_output_before_any_later_output_or_terminal_event() {
+    let emitter = Arc::new(MemoryApiEventEmitter::default());
+    let sink = BufferedExecutionEventSink::new(emitter.clone(), 32, Duration::from_millis(20));
+    let run_id = RunId::new("quiet-run").unwrap();
+    ExecutionEventSink::emit(
+        &sink,
+        &RunEvent {
+            run_id: run_id.clone(),
+            sequence: 1,
+            timestamp: Utc::now(),
+            event: RunEventKind::Output {
+                stream: OutputStream::Stdout,
+                message: "download started".into(),
+            },
+        },
+    )
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while emitter.events().is_empty() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("a quiet command must publish output without waiting for exit");
+    let events = emitter.events();
+    assert!(
+        matches!(&events[0], ApiEvent::RunOutput(output) if output.chunks[0].message == "download started")
+    );
+    ExecutionEventSink::emit(
+        &sink,
+        &RunEvent {
+            run_id,
+            sequence: 2,
+            timestamp: Utc::now(),
+            event: RunEventKind::StateChanged {
+                status: RunStatus::Succeeded,
+            },
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        emitter.events().len(),
+        2,
+        "terminal flush must not repeat the timed batch"
+    );
+}

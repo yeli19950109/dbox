@@ -154,9 +154,10 @@ struct PendingOutput {
     last_flush: Instant,
 }
 
+#[derive(Clone)]
 pub struct BufferedExecutionEventSink {
     emitter: Arc<dyn ApiEventEmitter>,
-    pending: Mutex<BTreeMap<RunId, PendingOutput>>,
+    pending: Arc<Mutex<BTreeMap<RunId, PendingOutput>>>,
     max_chunks: usize,
     max_interval: Duration,
 }
@@ -169,7 +170,7 @@ impl BufferedExecutionEventSink {
     ) -> Self {
         Self {
             emitter,
-            pending: Mutex::new(BTreeMap::new()),
+            pending: Arc::new(Mutex::new(BTreeMap::new())),
             max_chunks: max_chunks.max(1),
             max_interval,
         }
@@ -201,25 +202,53 @@ impl BufferedExecutionEventSink {
             stream: output_stream(stream),
             message: message.to_owned(),
         });
+        let first_in_batch = entry.chunks.len() == 1;
         let should_flush = entry.chunks.len() >= self.max_chunks
             || entry.last_flush.elapsed() >= self.max_interval;
         if should_flush {
             let batch = pending
                 .remove(&event.run_id)
                 .expect("the pending run output batch exists");
-            drop(pending);
             self.emit_output(&event.run_id, batch)?;
+        } else if first_in_batch {
+            // Flush even when a command prints one line and then waits for a long time.
+            // The generation check prevents an old timer from flushing a later batch.
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                let sink = self.clone();
+                let run_id = event.run_id.clone();
+                let first_sequence = event.sequence;
+                runtime.spawn(async move {
+                    tokio::time::sleep(sink.max_interval).await;
+                    if let Err(error) = sink.flush_batch(&run_id, first_sequence) {
+                        tracing::warn!(%run_id, %error, "could not flush live output");
+                    }
+                });
+            }
         }
         Ok(())
     }
 
     fn flush_run(&self, run_id: &RunId) -> Result<(), String> {
-        let batch = self
+        let mut pending = self
             .pending
             .lock()
-            .map_err(|_| "run output buffer mutex is poisoned".to_owned())?
-            .remove(run_id);
-        if let Some(batch) = batch {
+            .map_err(|_| "run output buffer mutex is poisoned".to_owned())?;
+        if let Some(batch) = pending.remove(run_id) {
+            self.emit_output(run_id, batch)?;
+        }
+        Ok(())
+    }
+
+    fn flush_batch(&self, run_id: &RunId, first_sequence: u64) -> Result<(), String> {
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| "run output buffer mutex is poisoned".to_owned())?;
+        if pending
+            .get(run_id)
+            .is_some_and(|batch| batch.first_sequence == first_sequence)
+        {
+            let batch = pending.remove(run_id).expect("the batch was just checked");
             self.emit_output(run_id, batch)?;
         }
         Ok(())

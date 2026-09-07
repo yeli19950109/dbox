@@ -11,6 +11,15 @@ export type ToolRecord = {
   providerIds: string[];
 };
 
+export function providerLabel(providerId: string): string {
+  return ({ "npm-global": "npm", homebrew: "brew" } as Record<string, string>)[providerId] ?? providerId;
+}
+
+export function miseInstallationLabel(installation: InstallationDto): string {
+  const activation = installation.scope === "global" ? "全局启用" : "未全局启用";
+  return `${installation.installedVersion ?? "未知版本"} · ${activation}`;
+}
+
 export function mapToolRecords(snapshot: SnapshotDto | null): ToolRecord[] {
   if (!snapshot) return [];
   const installations = new Map(

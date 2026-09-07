@@ -28,6 +28,10 @@
             <span>brew 路径</span>
             <input v-model="draft.executableOverrides.brew" type="text" placeholder="/opt/homebrew/bin/brew" />
           </label>
+          <label>
+            <span>mise 路径</span>
+            <input v-model="draft.executableOverrides.mise" type="text" placeholder="/opt/homebrew/bin/mise" />
+          </label>
         </div>
       </section>
 
@@ -45,7 +49,12 @@
               <strong>{{ provider }}</strong>
               <small>{{ providerStatus(provider) }}</small>
             </span>
-            <input v-model="draft.providerEnabled[provider]" type="checkbox" role="switch" />
+            <input
+              :checked="draft.providerEnabled[provider] ?? snapshots.snapshot?.providers.find((item) => item.providerId === provider)?.enabled ?? true"
+              type="checkbox"
+              role="switch"
+              @change="draft.providerEnabled[provider] = ($event.target as HTMLInputElement).checked"
+            />
           </label>
         </div>
       </section>
@@ -202,6 +211,7 @@ function cloneSettings(value: SettingsValueDto): SettingsValueDto {
   copy.executableOverrides.PATH ??= "";
   copy.executableOverrides.npm ??= "";
   copy.executableOverrides.brew ??= "";
+  copy.executableOverrides.mise ??= "";
   return copy;
 }
 
@@ -245,6 +255,8 @@ async function persistSettings(): Promise<void> {
 function providerStatus(providerId: string): string {
   const provider = snapshots.snapshot?.providers.find((item) => item.providerId === providerId);
   if (!provider) return "等待刷新";
+  if (!provider.enabled) return "已停用";
+  if (!provider.status && !provider.errors.length) return "等待刷新";
   if (!provider.status?.available) return provider.status?.detail ?? "不可用";
   return provider.status.version ?? "可用";
 }

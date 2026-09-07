@@ -21,6 +21,8 @@ function response(body: unknown, status = 200): MockResponse {
 }
 
 class EventSourceMock {
+  static readonly OPEN = 1;
+  readyState = 0;
   readonly url: string;
   readonly listeners = new Map<string, Set<EventListener>>();
   close = vi.fn();
@@ -40,6 +42,7 @@ class EventSourceMock {
   }
 
   dispatch(name: string, payload: unknown): void {
+    if (name === "open") this.readyState = 1;
     const event = new MessageEvent(name, { data: JSON.stringify(payload) });
     for (const listener of this.listeners.get(name) ?? []) listener(event);
   }
@@ -138,6 +141,37 @@ describe("Dev HTTP commands", () => {
 });
 
 describe("Dev HTTP events", () => {
+  it("shares a stream and waits for it to open before confirming a command", async () => {
+    vi.stubGlobal("EventSource", EventSourceMock);
+    const fetchMock = vi.fn().mockResolvedValue(response({ status: "ok", data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+    const stopOutput = await httpTransport.events.runOutput.listen(vi.fn());
+    const stopState = await httpTransport.events.runState.listen(vi.fn());
+    expect(eventSources).toHaveLength(1);
+    const pending = httpTransport.commands.confirm({ planId: "plan", planHash: "hash" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    eventSources[0]!.dispatch("open", {});
+    await pending;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    stopOutput();
+    expect(eventSources[0]!.close).not.toHaveBeenCalled();
+    stopState();
+    expect(eventSources[0]!.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not execute when the live stream cannot connect", async () => {
+    vi.stubGlobal("EventSource", EventSourceMock);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const stop = await httpTransport.events.runOutput.listen(vi.fn());
+    const pending = httpTransport.commands.confirm({ planId: "plan", planHash: "hash" });
+    const rejected = expect(pending).rejects.toThrow("实时事件连接失败");
+    eventSources[0]!.dispatch("error", {});
+    await rejected;
+    expect(fetchMock).not.toHaveBeenCalled();
+    stop();
+  });
+
   it("adapts SSE payloads and closes the connection when unlistened", async () => {
     vi.stubGlobal("EventSource", EventSourceMock);
     const listener = vi.fn();

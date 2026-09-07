@@ -8,6 +8,11 @@ case "$mode" in
     printf 'stderr-one\n' >&2
     printf '\033[31mstdout-two\033[0m\n'
     ;;
+  live-gated)
+    printf 'fixture-started\n'
+    while [ ! -f "$2" ]; do sleep 0.02; done
+    printf 'fixture-finished\n' >&2
+    ;;
   fail)
     printf 'command failed\n' >&2
     exit 7

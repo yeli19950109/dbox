@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::domain::{ComponentId, ProviderId, Run, RunId, StrategyId, Tool, ToolId};
+use crate::domain::{ComponentId, Installation, ProviderId, Run, RunId, StrategyId, Tool, ToolId};
 
 pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
 pub const STATE_SCHEMA_VERSION: u32 = 1;
@@ -192,6 +192,8 @@ impl Default for Settings {
 pub struct CachedState {
     #[serde(default)]
     pub tools: Vec<Tool>,
+    #[serde(default)]
+    pub installations: Vec<Installation>,
     #[serde(default)]
     pub runs: Vec<Run>,
     pub last_refresh_at: Option<DateTime<Utc>>,

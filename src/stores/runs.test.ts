@@ -66,6 +66,18 @@ describe("runs store", () => {
     expect(store.liveRuns.get("large-run")?.status).toBe("failed");
   });
 
+  it("keeps output delivered after a newer state event and never regresses the state", () => {
+    const store = useRunsStore();
+    store.applyState({ runId: "run", sequence: "5", timestamp: "2026-09-07T10:00:02Z", state: { kind: "state_changed", status: "succeeded" } });
+    store.applyOutput({ runId: "run", firstSequence: "2", lastSequence: "3", timestamp: "2026-09-07T10:00:01Z", chunks: [
+      { sequence: "2", stream: "stdout", message: "first output" },
+      { sequence: "3", stream: "stderr", message: "second output" },
+    ] });
+    store.applyState({ runId: "run", sequence: "1", timestamp: "2026-09-07T10:00:00Z", state: { kind: "state_changed", status: "running" } });
+    expect(store.liveRuns.get("run")?.lines.map((line) => line.message)).toEqual(["first output", "second output"]);
+    expect(store.liveRuns.get("run")?.status).toBe("succeeded");
+  });
+
   it("sends only plan id/hash and forces a new preview after invalid_plan", async () => {
     const plan = updatePlan();
     const confirm = vi.fn(() => apiError("invalid_plan", "expired"));

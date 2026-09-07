@@ -123,8 +123,10 @@ function strategyLabel(plan: UpdatePlanDto): string {
 }
 
 async function confirm(): Promise<void> {
-  await runs.confirmPlans();
-  if (!runs.needsRepreview) await router.push({ name: "runs" });
+  if (runs.executing || !runs.pendingPlans.length) return;
+  const execution = runs.confirmPlans();
+  await router.push({ name: "runs" });
+  await execution;
 }
 
 async function repreview(): Promise<void> {

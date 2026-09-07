@@ -3,10 +3,31 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setTransportForTests } from "../api/transport";
 import { apiError, createMockTransport } from "../test/mockTransport";
+import { snapshotWithTools } from "../test/fixtures";
+import { useSnapshotStore } from "../stores/snapshot";
 import SettingsView from "./SettingsView.vue";
 
 describe("SettingsView revision conflicts", () => {
   beforeEach(() => setActivePinia(createPinia()));
+
+  it("shows unscanned mise as enabled by default and exposes its executable override", async () => {
+    const mock = createMockTransport();
+    setTransportForTests(mock.transport);
+    const snapshot = snapshotWithTools();
+    snapshot.providers.push({ providerId: "mise", enabled: true, status: null, errors: [], refreshedAt: snapshot.refreshedAt! });
+    useSnapshotStore().acceptSnapshot(snapshot);
+    const wrapper = mount(SettingsView, { attachTo: document.body });
+    await flushPromises();
+    const mise = wrapper.findAll(".toggle-control").find((item) => item.text().includes("mise"))!;
+    expect(mise.text()).toContain("等待刷新");
+    expect((mise.get("input").element as HTMLInputElement).checked).toBe(true);
+    expect(wrapper.findAll("label").some((label) => label.text().trim() === "mise 路径" && label.find('input[type="text"]').exists())).toBe(true);
+    await mise.get("input").setValue(false);
+    await wrapper.get('[data-testid="settings-save"]').trigger("click");
+    await flushPromises();
+    expect(mock.transport.commands.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ settings: expect.objectContaining({ providerEnabled: expect.objectContaining({ mise: false }) }) }));
+    wrapper.unmount();
+  });
 
   it("keeps the user's settings draft when the backend reports a conflict", async () => {
     const mock = createMockTransport({

@@ -22,7 +22,8 @@ use crate::persistence::{
     AppPaths, PersistenceStore, Revision, Settings, StoreError, StoreErrorKind,
 };
 use crate::providers::{
-    HomebrewProvider, NpmGlobalProvider, ProviderRegistry, ProviderRegistryError, Recoverability,
+    HomebrewProvider, MiseProvider, NpmGlobalProvider, ProviderRegistry, ProviderRegistryError,
+    Recoverability,
 };
 use crate::version::VersionValue;
 
@@ -74,9 +75,16 @@ impl ApiService {
             settings.value.executable_overrides.get("brew"),
             store.paths().data_dir.join("unavailable/brew"),
         );
+        let mise_path = resolve_provider_program(
+            &provider_resolver,
+            "mise",
+            settings.value.executable_overrides.get("mise"),
+            store.paths().data_dir.join("unavailable/mise"),
+        );
         let mut registry = ProviderRegistry::new();
         registry.register(Arc::new(NpmGlobalProvider::new(npm_path)))?;
         registry.register(Arc::new(HomebrewProvider::new(brew_path)))?;
+        registry.register(Arc::new(MiseProvider::new(mise_path)))?;
         let catalog = load_catalog_with_built_ins(store.paths().manifests_dir());
         let event_sink = Arc::new(BufferedExecutionEventSink::new(
             Arc::clone(&emitter),

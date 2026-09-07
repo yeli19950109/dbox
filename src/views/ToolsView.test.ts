@@ -146,7 +146,7 @@ describe("ToolsView", () => {
       global: { plugins: [router] },
     });
     await flushPromises();
-    await wrapper.findAll("select")[0]!.setValue("updates");
+    await wrapper.get('input[name="tool-status"][value="updates"]').setValue(true);
 
     expect(wrapper.text()).toContain("1 / 2 项");
     expect(wrapper.text()).toContain("Shared CLI");
@@ -155,6 +155,32 @@ describe("ToolsView", () => {
     expect(wrapper.get(".selection-bar").text()).toContain("已选择 1 个 Component");
     await updateSelection.setValue(false);
     expect(wrapper.find(".selection-bar").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("keeps non-search filters in the sidebar and includes registered sources without installations", async () => {
+    const snapshot = snapshotWithTools(3);
+    snapshot.providers.push({ providerId: "mise", enabled: true, status: null, errors: [], refreshedAt: snapshot.refreshedAt! });
+    const mock = createMockTransport({ snapshot: vi.fn(() => Promise.resolve({ status: "ok", data: snapshot })) });
+    setTransportForTests(mock.transport);
+    useSnapshotStore().acceptSnapshot(snapshot);
+    const router = testRouter();
+    await router.push("/tools");
+    const wrapper = mount(ToolsView, { attachTo: document.body, global: { plugins: [router] } });
+    await flushPromises();
+
+    const sidebar = wrapper.get('aside[aria-label="工具筛选"]');
+    expect(sidebar.find('input[type="search"]').exists()).toBe(false);
+    expect(sidebar.text()).toContain("类别");
+    expect(sidebar.text()).toContain("显示已隐藏");
+    expect(sidebar.text()).toContain("mise");
+    expect(wrapper.get(".tool-search").findAll("input")).toHaveLength(1);
+    await sidebar.get('input[name="tool-provider"][value="mise"]').setValue(true);
+    expect(wrapper.text()).toContain("0 / 3 项");
+    expect(sidebar.get('input[name="tool-provider"][value="mise"]').exists()).toBe(true);
+    await sidebar.get("button").trigger("click");
+    expect(wrapper.text()).toContain("3 / 3 项");
+    expect(wrapper.findAll(".source-badge").map((badge) => badge.text())).toContain("npm");
     wrapper.unmount();
   });
 

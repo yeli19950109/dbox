@@ -24,7 +24,7 @@ export type DisplayLogLine = {
 export type LiveRun = {
   id: string;
   status: string;
-  lastSequence?: string;
+  lastStateSequence?: string;
   exitCode: number | null;
   startedAt: string | null;
   finishedAt: string | null;
@@ -56,6 +56,7 @@ export const useRunsStore = defineStore("runs", () => {
   const logRevision = ref(0);
   let eventCleanup: Array<() => void> = [];
   let eventsConnected = false;
+  let connectingEvents: Promise<void> | null = null;
 
   const orderedLiveRuns = computed(() =>
     [...liveRuns.value.values()].sort((left, right) =>
@@ -82,26 +83,30 @@ export const useRunsStore = defineStore("runs", () => {
 
   function applyOutput(event: RunOutputEventDto): void {
     const run = mutateRun(event.runId, event.timestamp);
+    const known = new Set(run.lines.map((line) => line.sequence));
     let changed = false;
     for (const chunk of event.chunks) {
-      if (!isNewerSequence(chunk.sequence, run.lastSequence)) continue;
+      if (known.has(chunk.sequence)) continue;
       run.lines.push({
         sequence: chunk.sequence,
         timestamp: event.timestamp,
         stream: chunk.stream,
         message: chunk.message,
       });
-      run.lastSequence = chunk.sequence;
+      known.add(chunk.sequence);
       changed = true;
     }
-    if (changed) void scheduleLogRender();
+    if (changed) {
+      run.lines.sort((left, right) => BigInt(left.sequence) < BigInt(right.sequence) ? -1 : 1);
+      void scheduleLogRender();
+    }
   }
 
   function applyState(event: RunStateEventDto): void {
     const existing = liveRuns.value.get(event.runId);
-    if (existing && !isNewerSequence(event.sequence, existing.lastSequence)) return;
+    if (existing && !isNewerSequence(event.sequence, existing.lastStateSequence)) return;
     const run = mutateRun(event.runId, event.timestamp);
-    run.lastSequence = event.sequence;
+    run.lastStateSequence = event.sequence;
     if (event.state.kind === "state_changed") {
       run.status = event.state.status;
       if (event.state.status !== "queued" && !run.startedAt) {
@@ -117,15 +122,24 @@ export const useRunsStore = defineStore("runs", () => {
     logRevision.value += 1;
   }
 
-  async function connectEvents(): Promise<void> {
-    if (eventsConnected) return;
-    eventsConnected = true;
+  function connectEvents(): Promise<void> {
+    if (connectingEvents) return connectingEvents;
+    if (eventsConnected) return Promise.resolve();
     const transport = getTransport();
-    const [stopOutput, stopState] = await Promise.all([
+    connectingEvents = Promise.allSettled([
       transport.events.runOutput.listen(({ payload }) => applyOutput(payload)),
       transport.events.runState.listen(({ payload }) => applyState(payload)),
-    ]);
-    eventCleanup = [stopOutput, stopState];
+    ]).then((results) => {
+      const cleanups = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure) {
+        cleanups.forEach((cleanup) => cleanup());
+        throw failure.reason;
+      }
+      eventCleanup = cleanups;
+      eventsConnected = true;
+    }).finally(() => { connectingEvents = null; });
+    return connectingEvents;
   }
 
   function disconnectEvents(): void {
@@ -201,6 +215,8 @@ export const useRunsStore = defineStore("runs", () => {
   }
 
   function hydrateHistoryRun(historyRun: RunDto): void {
+    // A history request can finish after newer live events have already arrived.
+    if (liveRuns.value.get(historyRun.id)?.lastStateSequence) return;
     const run = mutateRun(historyRun.id, historyRun.startedAt ?? historyRun.createdAt);
     run.status = historyRun.status;
     run.exitCode = historyRun.summary?.exitCode ?? null;
@@ -211,12 +227,18 @@ export const useRunsStore = defineStore("runs", () => {
   }
 
   async function confirmPlans(): Promise<ExecutionResultDto[]> {
-    if (pendingPlans.value.length === 0) return [];
+    if (executing.value || pendingPlans.value.length === 0) return [];
     executing.value = true;
     error.value = null;
     const results: ExecutionResultDto[] = [];
     const plans = [...pendingPlans.value];
     try {
+      try {
+        await connectEvents();
+      } catch (reason) {
+        error.value = `无法连接实时日志，请重试：${reason instanceof Error ? reason.message : String(reason)}`;
+        return results;
+      }
       for (const plan of plans) {
         try {
           // The backend plan id/hash are the only execution inputs by design.

@@ -209,7 +209,10 @@ async fn event_stream(
         // A lagging browser can recover by requesting a fresh snapshot.
         Err(_) => None,
     });
-    Sse::new(stream).keep_alive(
+    // Send a body frame immediately so browsers/proxies finish opening the stream
+    // before a command starts, even when there are no other events yet.
+    let connected = tokio_stream::once(Ok(Event::default().comment("connected")));
+    Sse::new(connected.chain(stream)).keep_alive(
         KeepAlive::new()
             .interval(Duration::from_secs(15))
             .text("keep-alive"),
@@ -497,6 +500,12 @@ mod tests {
         assert_eq!(response.headers()["content-type"], "text/event-stream");
         let mut body = response.into_body().into_data_stream();
         assert_eq!(fixture.events.sender.receiver_count(), 1);
+        let connected = tokio::time::timeout(Duration::from_secs(1), body.next())
+            .await
+            .expect("SSE must open before any application event")
+            .unwrap()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&connected).contains(": connected"));
 
         let cases = [
             (

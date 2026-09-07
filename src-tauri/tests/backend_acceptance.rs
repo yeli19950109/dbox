@@ -350,3 +350,42 @@ async fn cancel_command_stops_an_active_confirmed_run() {
         "cancelled"
     );
 }
+
+#[tokio::test]
+async fn confirmed_command_emits_live_output_while_the_confirm_response_is_pending() {
+    let gate_dir = TempDir::new().unwrap();
+    let gate = gate_dir.path().join("finish");
+    let fixture = Fixture::new(vec!["live-gated".into(), gate.display().to_string()]);
+    let plan = fixture.preview().await;
+    let api = Arc::clone(&fixture.api);
+    let execution = tokio::spawn(async move {
+        api.confirm(ConfirmRequestDto {
+            plan_id: plan.plan_id,
+            plan_hash: plan.plan_hash,
+        })
+        .await
+    });
+    let first_output = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if fixture.emitter.events().iter().any(|event| matches!(event,
+                ApiEvent::RunOutput(output) if output.chunks.iter().any(|chunk| chunk.message.contains("fixture-started"))
+            )) { break; }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }).await;
+    if first_output.is_err() {
+        execution.abort();
+        let _ = execution.await;
+        panic!("live output was not delivered before the command finished");
+    }
+    assert!(
+        !execution.is_finished(),
+        "confirm must still be running when the first output reaches the UI"
+    );
+    fs::write(gate, "finish").unwrap();
+    let confirmed = execution.await.unwrap().unwrap();
+    assert_eq!(confirmed.execution.status, "succeeded");
+    assert!(fixture.emitter.events().iter().any(|event| matches!(event,
+        ApiEvent::RunOutput(output) if output.chunks.iter().any(|chunk| chunk.message.contains("fixture-finished"))
+    )));
+}

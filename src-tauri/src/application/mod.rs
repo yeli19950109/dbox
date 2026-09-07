@@ -258,7 +258,29 @@ impl ApplicationService {
         let cached = store.load_state()?;
         let snapshot = ApplicationSnapshot {
             tools: cached.value.tools,
-            providers: BTreeMap::new(),
+            providers: registry
+                .list()
+                .into_iter()
+                .map(|registration| {
+                    let enabled = registration.enabled
+                        && settings
+                            .value
+                            .provider_enabled
+                            .get(&registration.id)
+                            .copied()
+                            .unwrap_or(true);
+                    (
+                        registration.id.clone(),
+                        ProviderRefreshReport {
+                            provider_id: registration.id,
+                            enabled,
+                            status: None,
+                            errors: Vec::new(),
+                            refreshed_at: cached.value.last_refresh_at.unwrap_or_else(Utc::now),
+                        },
+                    )
+                })
+                .collect(),
             catalog_diagnostics: Vec::new(),
             catalog_errors,
             config_revision: settings.revision.as_str().into(),
@@ -275,7 +297,12 @@ impl ApplicationService {
             options,
             operation: Mutex::new(()),
             state: RwLock::new(ServiceState {
-                installations: BTreeMap::new(),
+                installations: cached
+                    .value
+                    .installations
+                    .into_iter()
+                    .map(|installation| (installation.id.clone(), installation))
+                    .collect(),
                 snapshot,
                 provider_refreshed: BTreeMap::new(),
                 plans: BTreeMap::new(),
@@ -451,7 +478,7 @@ impl ApplicationService {
         apply_strategy_preferences(&mut tools, &settings.value);
         tools.sort_by(|left, right| left.id.cmp(&right.id));
 
-        let saved = self.persist_tools(&tools, Some(now), None)?;
+        let saved = self.persist_tools(&tools, Some(now), None, Some(&installations))?;
         let environment_revision = self.environment.revision();
         let snapshot = ApplicationSnapshot {
             tools,
@@ -506,8 +533,12 @@ impl ApplicationService {
         let mut state = self.state.write().await;
         let component = find_component_mut(&mut state.snapshot.tools, tool_id, component_id)?;
         component.default_strategy = Some(strategy_id.clone());
-        let saved_state =
-            self.persist_tools(&state.snapshot.tools, state.snapshot.refreshed_at, None)?;
+        let saved_state = self.persist_tools(
+            &state.snapshot.tools,
+            state.snapshot.refreshed_at,
+            None,
+            None,
+        )?;
         state.snapshot.config_revision = saved_settings.revision.as_str().into();
         state.snapshot.state_revision = saved_state.as_str().into();
         Ok(state.snapshot.clone())
@@ -522,8 +553,12 @@ impl ApplicationService {
         let saved_settings = self.store.save_settings(expected_revision, settings)?;
         let mut state = self.state.write().await;
         apply_strategy_preferences(&mut state.snapshot.tools, &saved_settings.value);
-        let saved_state =
-            self.persist_tools(&state.snapshot.tools, state.snapshot.refreshed_at, None)?;
+        let saved_state = self.persist_tools(
+            &state.snapshot.tools,
+            state.snapshot.refreshed_at,
+            None,
+            None,
+        )?;
         state.snapshot.config_revision = saved_settings.revision.as_str().into();
         state.snapshot.state_revision = saved_state.as_str().into();
         Ok(saved_settings)
@@ -725,8 +760,12 @@ impl ApplicationService {
                     ),
                 };
                 state.plans.remove(&request.plan_id);
-                let saved =
-                    self.persist_tools(&state.snapshot.tools, state.snapshot.refreshed_at, None)?;
+                let saved = self.persist_tools(
+                    &state.snapshot.tools,
+                    state.snapshot.refreshed_at,
+                    None,
+                    None,
+                )?;
                 state.snapshot.state_revision = saved.as_str().into();
                 return Err(ApplicationError::Execution(error));
             }
@@ -814,6 +853,7 @@ impl ApplicationService {
             &state.snapshot.tools,
             state.snapshot.refreshed_at,
             Some(run),
+            Some(&state.installations),
         )?;
         state.snapshot.state_revision = saved.as_str().into();
         let snapshot = state.snapshot.clone();
@@ -843,7 +883,7 @@ impl ApplicationService {
         apply_component_memory(&mut tools, &memory);
         apply_strategy_preferences(&mut tools, &settings.value);
         tools.sort_by(|left, right| left.id.cmp(&right.id));
-        let saved = self.persist_tools(&tools, previous_snapshot.refreshed_at, None)?;
+        let saved = self.persist_tools(&tools, previous_snapshot.refreshed_at, None, None)?;
 
         *self.catalog.write().await = catalog;
         let mut state = self.state.write().await;
@@ -978,10 +1018,14 @@ impl ApplicationService {
         tools: &[Tool],
         refreshed_at: Option<DateTime<Utc>>,
         run: Option<Run>,
+        installations: Option<&BTreeMap<InstallationId, Installation>>,
     ) -> Result<Revision, ApplicationError> {
         let loaded = self.store.load_state()?;
         let mut cached = loaded.value;
         cached.tools = tools.to_vec();
+        if let Some(installations) = installations {
+            cached.installations = installations.values().cloned().collect();
+        }
         cached.last_refresh_at = refreshed_at;
         if let Some(run) = run {
             cached.runs.push(run);

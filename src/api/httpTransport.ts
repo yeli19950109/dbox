@@ -73,9 +73,33 @@ function isCommandResult<T>(value: unknown): value is CommandResult<T> {
   );
 }
 
+// All channels share one stream so output/state ordering is retained and long-lived
+// SSE requests do not exhaust the browser's per-origin HTTP connection pool.
+let eventStream: { source: EventSource; subscribers: number } | null = null;
+
+function waitForOpen(source: EventSource): Promise<void> {
+  if (source.readyState === EventSource.OPEN) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timeout);
+      source.removeEventListener("open", opened);
+      source.removeEventListener("error", failed);
+    };
+    const opened = () => { cleanup(); resolve(); };
+    const failed = () => { cleanup(); reject(new Error("实时事件连接失败")); };
+    const timeout = setTimeout(() => { cleanup(); reject(new Error("实时事件连接超时")); }, 10_000);
+    source.addEventListener("open", opened);
+    source.addEventListener("error", failed);
+  });
+}
+
 function eventChannel<T>(eventName: string) {
   const listen = async (callback: BrowserEventCallback<T>): Promise<() => void> => {
-    const source = new EventSource(`${HTTP_PREFIX}/events`);
+    const stream = eventStream ??= {
+      source: new EventSource(`${HTTP_PREFIX}/events`),
+      subscribers: 0,
+    };
+    stream.subscribers += 1;
     const handler = (event: Event) => {
       const message = event as MessageEvent<string>;
       try {
@@ -84,19 +108,30 @@ function eventChannel<T>(eventName: string) {
         console.error(`Ignored invalid ${eventName} Dev HTTP event`, reason);
       }
     };
-    source.addEventListener(eventName, handler);
-    return () => {
-      source.removeEventListener(eventName, handler);
-      source.close();
+    stream.source.addEventListener(eventName, handler);
+    let stopped = false;
+    const cleanup = () => {
+      if (stopped) return;
+      stopped = true;
+      stream.source.removeEventListener(eventName, handler);
+      if (--stream.subscribers === 0) {
+        stream.source.close();
+        if (eventStream === stream) eventStream = null;
+      }
     };
+    return cleanup;
   };
 
   const once = async (callback: BrowserEventCallback<T>): Promise<() => void> => {
-    let cleanup = () => undefined;
+    let cleanup: (() => void) | undefined;
+    let received = false;
     cleanup = await listen((event) => {
-      cleanup();
+      if (received) return;
+      received = true;
+      cleanup?.();
       callback(event);
     });
+    if (received) cleanup();
     return cleanup;
   };
 
@@ -114,8 +149,12 @@ const httpCommands = {
     command<SnapshotDto>("refresh", request),
   preview: (request: Parameters<typeof generatedCommands.preview>[0]) =>
     command<UpdatePlanDto[]>("preview", request),
-  confirm: (request: Parameters<typeof generatedCommands.confirm>[0]) =>
-    command<ConfirmResponseDto>("confirm", request),
+  confirm: async (request: Parameters<typeof generatedCommands.confirm>[0]) => {
+    // Keep subscriptions alive through reconnects, but do not start a command before
+    // the stream carrying its first state/output events is actually open.
+    if (eventStream) await waitForOpen(eventStream.source);
+    return command<ConfirmResponseDto>("confirm", request);
+  },
   cancel: (request: Parameters<typeof generatedCommands.cancel>[0]) =>
     command<CancelResponseDto>("cancel", request),
   runHistory: () => command<RunHistoryDto>("run_history"),

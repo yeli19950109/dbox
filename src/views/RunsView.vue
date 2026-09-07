@@ -1,5 +1,17 @@
 <template>
   <div class="view runs-view">
+    <div v-if="runs.needsRepreview" class="inline-warning" role="alert">
+      <span>{{ runs.error }}</span>
+      <button class="button primary" type="button" @click="repreview">重新预览</button>
+    </div>
+    <div v-else-if="runs.error" class="inline-error" role="alert">
+      <span>{{ runs.error }}</span>
+      <RouterLink v-if="runs.pendingPlans.length && !runs.executing" class="button secondary" to="/runs/confirm">返回确认</RouterLink>
+    </div>
+    <div v-if="runs.executing" class="execution-progress" role="status" aria-live="polite">
+      <span class="spinner" aria-hidden="true" />
+      <span>{{ selectedRun ? "正在执行更新，输出会实时显示在下方。" : "正在启动更新，等待执行记录…" }}</span>
+    </div>
     <section v-if="runs.orderedLiveRuns.length" class="live-strip" aria-label="实时运行队列">
       <button
         v-for="run in runs.orderedLiveRuns"
@@ -108,6 +120,7 @@
           </div>
           <RunLog :lines="selectedRun.lines" :revision="runs.logRevision" />
         </template>
+        <AppLoading v-else-if="runs.executing" label="等待命令启动与实时输出…" />
         <AppEmptyState
           v-else
           title="选择一条运行记录"
@@ -120,7 +133,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useNow } from "@vueuse/core";
 import { useRouter } from "vue-router";
 import type { RunDto } from "../bindings";
@@ -136,6 +149,13 @@ const snapshots = useSnapshotStore();
 const router = useRouter();
 const now = useNow({ interval: 1000 });
 const selectedRunId = ref<string | null>(null);
+const followNewRuns = ref(true);
+
+watch(() => runs.orderedLiveRuns.map((run) => run.id), (ids, previous = []) => {
+  if (!followNewRuns.value) return;
+  const next = ids.find((id) => !previous.includes(id));
+  if (next) selectedRunId.value = next;
+}, { immediate: true });
 
 const selectedRun = computed(() =>
   selectedRunId.value ? runs.liveRuns.get(selectedRunId.value) ?? null : null,
@@ -173,15 +193,21 @@ function verificationLabel(status: string): string {
 }
 
 function selectLive(id: string): void {
+  followNewRuns.value = false;
   selectedRunId.value = id;
 }
 async function selectHistory(run: RunDto): Promise<void> {
+  followNewRuns.value = false;
   selectedRunId.value = run.id;
   await runs.loadLog(run.id);
   runs.hydrateHistoryRun(run);
 }
 async function retry(run: RunDto): Promise<void> {
   await runs.retry(run);
+  await router.push({ name: "confirm" });
+}
+async function repreview(): Promise<void> {
+  await runs.repreview();
   await router.push({ name: "confirm" });
 }
 function cancel(runId: string): void {
@@ -195,10 +221,16 @@ function reloadHistory(): void {
 }
 
 onMounted(async () => {
+  await runs.connectEvents().catch(() => undefined);
   await runs.loadHistory().catch(() => undefined);
+  if (selectedRunId.value || runs.executing) return;
   const active = runs.orderedLiveRuns[0];
   const historical = runs.history[0];
   if (active) selectedRunId.value = active.id;
-  else if (historical) await selectHistory(historical);
+  else if (historical) {
+    selectedRunId.value = historical.id;
+    runs.hydrateHistoryRun(historical);
+    await runs.loadLog(historical.id).catch(() => undefined);
+  }
 });
 </script>

@@ -12,145 +12,154 @@
       </span>
     </section>
 
-    <section class="toolbar" aria-label="工具筛选">
-      <label class="search-field">
-        <span class="sr-only">搜索工具、包或可执行文件</span>
-        <span aria-hidden="true">⌕</span>
-        <input
-          v-model="searchInput"
-          type="search"
-          placeholder="搜索工具、包或可执行文件"
+    <div class="tools-layout">
+      <aside v-if="!compactFilters" class="filter-sidebar" aria-label="工具筛选">
+        <header class="filter-sidebar__header">
+          <h2>筛选</h2>
+          <button type="button" class="text-button" @click="resetSideFilters">重置</button>
+        </header>
+        <ToolFilters
+          v-model:status="statusFilter"
+          v-model:provider="providerFilter"
+          v-model:category="categoryFilter"
+          v-model:include-hidden="includeHidden"
+          :providers="providers"
+          :provider-counts="providerCounts"
+          :categories="categories"
         />
-      </label>
-      <label>
-        <span>状态</span>
-        <select v-model="statusFilter">
-          <option value="all">全部</option>
-          <option value="updates">有更新</option>
-          <option value="unknown">未知</option>
-          <option value="failed">失败</option>
-        </select>
-      </label>
-      <label>
-        <span>Provider</span>
-        <select v-model="providerFilter">
-          <option value="all">全部来源</option>
-          <option v-for="provider in providers" :key="provider" :value="provider">
-            {{ provider }}
-          </option>
-        </select>
-      </label>
-      <label>
-        <span>类别</span>
-        <select v-model="categoryFilter">
-          <option value="all">全部类别</option>
-          <option v-for="category in categories" :key="category" :value="category">
-            {{ category }}
-          </option>
-        </select>
-      </label>
-      <label class="check-control">
-        <input v-model="includeHidden" type="checkbox" />
-        显示已隐藏
-      </label>
-    </section>
+      </aside>
+      <dialog v-else ref="filterDialog" class="filter-drawer" aria-label="工具筛选" @click="closeFilterBackdrop">
+        <header class="filter-sidebar__header">
+          <h2>筛选</h2>
+          <button type="button" class="text-button" @click="resetSideFilters">重置</button>
+          <button type="button" class="icon-button" aria-label="关闭筛选" @click="filterDialog?.close()">×</button>
+        </header>
+        <ToolFilters
+          v-model:status="statusFilter"
+          v-model:provider="providerFilter"
+          v-model:category="categoryFilter"
+          v-model:include-hidden="includeHidden"
+          :providers="providers"
+          :provider-counts="providerCounts"
+          :categories="categories"
+        />
+        <button type="button" class="button primary filter-drawer__done" @click="filterDialog?.close()">查看 {{ filteredRecords.length }} 项结果</button>
+      </dialog>
+      <div class="tools-content">
+        <section class="tool-search" aria-label="搜索工具">
+          <label class="search-field">
+            <span class="sr-only">搜索工具、包或可执行文件</span>
+            <span aria-hidden="true">⌕</span>
+            <input
+              v-model="searchInput"
+              type="search"
+              placeholder="搜索工具、包或可执行文件"
+            />
+          </label>
+          <button v-if="compactFilters" class="button secondary" type="button" @click="filterDialog?.showModal()">
+            筛选<span v-if="activeFilterCount"> · {{ activeFilterCount }}</span>
+          </button>
+        </section>
 
-    <section
-      v-if="store.refreshing"
-      class="refresh-progress"
-      role="status"
-      aria-live="polite"
-    >
-      <div class="refresh-progress__summary">
-        <span class="spinner refresh-progress__spinner" aria-hidden="true" />
-        <div>
-          <strong>{{ refreshProgressTitle }}</strong>
-          <span>{{ refreshProgressDetail }}</span>
-        </div>
-        <span v-if="refreshProgressTotal" class="refresh-progress__count">
-          {{ refreshProgressPosition }} / {{ refreshProgressTotal }}
-        </span>
-      </div>
-      <div
-        class="refresh-progress__track"
-        :data-indeterminate="!refreshProgressTotal"
-        role="progressbar"
-        aria-label="刷新工具进度"
-        aria-valuemin="0"
-        :aria-valuemax="refreshProgressTotal || undefined"
-        :aria-valuenow="refreshProgressTotal ? refreshProgressCompleted : undefined"
-        :aria-valuetext="refreshProgressDetail"
-      >
-        <span :style="refreshProgressBarStyle" />
-      </div>
-    </section>
-
-    <div class="results-bar">
-      <span>
-        <strong>{{ filteredRecords.length }}</strong> / {{ store.toolRecords.length }} 项
-      </span>
-      <span v-if="lastChecked">上次检查：{{ lastChecked }}</span>
-      <div v-if="providers.length" class="provider-refreshes" aria-label="按 Provider 刷新">
-        <button
-          v-for="provider in providers"
-          :key="provider"
-          type="button"
-          class="text-button"
-          @click="refreshProvider(provider)"
+        <section
+          v-if="store.refreshing"
+          class="refresh-progress"
+          role="status"
+          aria-live="polite"
         >
-          刷新 {{ provider }}
-        </button>
-      </div>
-    </div>
+          <div class="refresh-progress__summary">
+            <span class="spinner refresh-progress__spinner" aria-hidden="true" />
+            <div>
+              <strong>{{ refreshProgressTitle }}</strong>
+              <span>{{ refreshProgressDetail }}</span>
+            </div>
+            <span v-if="refreshProgressTotal" class="refresh-progress__count">
+              {{ refreshProgressPosition }} / {{ refreshProgressTotal }}
+            </span>
+          </div>
+          <div
+            class="refresh-progress__track"
+            :data-indeterminate="!refreshProgressTotal"
+            role="progressbar"
+            aria-label="刷新工具进度"
+            aria-valuemin="0"
+            :aria-valuemax="refreshProgressTotal || undefined"
+            :aria-valuenow="refreshProgressTotal ? refreshProgressCompleted : undefined"
+            :aria-valuetext="refreshProgressDetail"
+          >
+            <span :style="refreshProgressBarStyle" />
+          </div>
+        </section>
 
-    <div v-if="store.error" class="inline-error" role="alert">
-      <span>{{ store.error }}</span>
-      <button type="button" class="text-button" @click="initialize">重试</button>
-    </div>
-    <AppLoading v-else-if="store.loading && !store.snapshot" label="正在读取工具快照…" />
-    <AppEmptyState
-      v-else-if="!filteredRecords.length"
-      title="没有符合条件的工具"
-      description="调整筛选条件，或刷新 Provider 重新扫描全局安装项。"
-      mark="⌁"
-    >
-      <button class="button secondary" type="button" @click="clearFilters">
-        清除筛选
-      </button>
-    </AppEmptyState>
-    <div
-      v-else
-      ref="scrollElement"
-      class="virtual-list tool-virtual-list"
-      data-testid="tool-virtual-list"
-    >
-      <div class="virtual-list__sizer" :style="{ height: `${virtualizer.getTotalSize()}px` }">
+        <div class="results-bar">
+          <span>
+            <strong>{{ filteredRecords.length }}</strong> / {{ store.toolRecords.length }} 项
+          </span>
+          <span v-if="lastChecked">上次检查：{{ lastChecked }}</span>
+          <div v-if="providers.length" class="provider-refreshes" aria-label="按 Provider 刷新">
+            <button
+              v-for="provider in providers"
+              :key="provider"
+              type="button"
+              class="text-button"
+              @click="refreshProvider(provider)"
+            >
+              刷新 {{ providerLabel(provider) }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="store.error" class="inline-error" role="alert">
+          <span>{{ store.error }}</span>
+          <button type="button" class="text-button" @click="initialize">重试</button>
+        </div>
+        <AppLoading v-else-if="store.loading && !store.snapshot" label="正在读取工具快照…" />
+        <AppEmptyState
+          v-else-if="!filteredRecords.length"
+          title="没有符合条件的工具"
+          description="调整筛选条件，或刷新 Provider 重新扫描全局安装项。"
+          mark="⌁"
+        >
+          <button class="button secondary" type="button" @click="clearFilters">
+            清除筛选
+          </button>
+        </AppEmptyState>
         <div
-          v-for="virtualRow in virtualRows"
-          :key="filteredRecords[virtualRow.index]?.tool.id"
-          :data-index="virtualRow.index"
-          class="virtual-list__row"
-          :style="{ transform: `translateY(${virtualRow.start}px)` }"
+          v-else
+          ref="scrollElement"
+          class="virtual-list tool-virtual-list"
+          data-testid="tool-virtual-list"
         >
-          <ToolCard
-            v-if="filteredRecords[virtualRow.index]"
-            :record="filteredRecords[virtualRow.index]!"
-            :selected="selected"
-            @details="openDetails(filteredRecords[virtualRow.index]!, $event)"
-            @select-updates="selectToolUpdates(filteredRecords[virtualRow.index]!)"
-          />
+          <div class="virtual-list__sizer" :style="{ height: `${virtualizer.getTotalSize()}px` }">
+            <div
+              v-for="virtualRow in virtualRows"
+              :key="filteredRecords[virtualRow.index]?.tool.id"
+              :data-index="virtualRow.index"
+              class="virtual-list__row"
+              :style="{ transform: `translateY(${virtualRow.start}px)` }"
+            >
+              <ToolCard
+                v-if="filteredRecords[virtualRow.index]"
+                :record="filteredRecords[virtualRow.index]!"
+                :selected="selected"
+                @details="openDetails(filteredRecords[virtualRow.index]!, $event)"
+                @select-updates="selectToolUpdates(filteredRecords[virtualRow.index]!)"
+              />
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
 
-    <div v-if="selected.size" class="selection-bar" role="region" aria-label="批量更新选择">
-      <span>已选择 <strong>{{ selected.size }}</strong> 个 Component</span>
-      <button type="button" class="text-button" @click="selected = new Set()">
-        清除
-      </button>
-      <button type="button" class="button primary" @click="previewSelected">
-        预览更新
-      </button>
+        <div v-if="selected.size" class="selection-bar" role="region" aria-label="批量更新选择">
+          <span>已选择 <strong>{{ selected.size }}</strong> 个 Component</span>
+          <button type="button" class="text-button" @click="selected = new Set()">
+            清除
+          </button>
+          <button type="button" class="button primary" @click="previewSelected">
+            预览更新
+          </button>
+        </div>
+
+      </div>
     </div>
 
     <aside
@@ -183,8 +192,9 @@
           :key="installation.id"
           class="detail-block"
         >
-          <strong>{{ installation.providerId }} · {{ installation.packageKind }}</strong>
+          <strong>{{ providerLabel(installation.providerId) }} · {{ installation.packageKind }}</strong>
           <code>{{ installation.packageName }}</code>
+          <p v-if="installation.providerId === 'mise'">{{ miseInstallationLabel(installation) }}</p>
           <p>{{ installation.installPath ?? "Provider 未返回安装路径" }}</p>
           <ul>
             <li v-for="executable in installation.executables" :key="executable.path">
@@ -248,18 +258,21 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { useDebounceFn } from "@vueuse/core";
+import { useDebounceFn, useMediaQuery } from "@vueuse/core";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import { useRouter } from "vue-router";
 import AppEmptyState from "../components/AppEmptyState.vue";
 import AppLoading from "../components/AppLoading.vue";
 import ToolCard from "../components/ToolCard.vue";
+import ToolFilters from "../components/ToolFilters.vue";
 import { useRunsStore } from "../stores/runs";
 import { useSnapshotStore } from "../stores/snapshot";
 import type { ToolRecord } from "../utils/presentation";
 import {
   compareToolUpdatePriority,
   formatDate,
+  miseInstallationLabel,
+  providerLabel,
   toolHasUpdates,
   updateableComponents,
 } from "../utils/presentation";
@@ -273,6 +286,12 @@ const statusFilter = ref("all");
 const providerFilter = ref("all");
 const categoryFilter = ref("all");
 const includeHidden = ref(false);
+const compactFilters = useMediaQuery("(max-width: 760px)");
+const filterDialog = ref<HTMLDialogElement | null>(null);
+const activeFilterCount = computed(() =>
+  Number(statusFilter.value !== "all") + Number(providerFilter.value !== "all") +
+  Number(categoryFilter.value !== "all") + Number(includeHidden.value),
+);
 const selected = ref<Set<string>>(new Set());
 const strategies = ref<Record<string, string>>({});
 const detailRecord = ref<ToolRecord | null>(null);
@@ -287,8 +306,14 @@ const updateSearch = useDebounceFn((value: string) => {
 watch(searchInput, (value) => void updateSearch(value));
 
 const providers = computed(() => [
-  ...new Set(store.toolRecords.flatMap((record) => record.providerIds)),
+  ...new Set([
+    ...(store.snapshot?.providers.map((provider) => provider.providerId) ?? []),
+    ...store.toolRecords.flatMap((record) => record.providerIds),
+  ]),
 ]);
+const providerCounts = computed(() => Object.fromEntries(
+  providers.value.map((id) => [id, store.toolRecords.filter((record) => record.providerIds.includes(id)).length]),
+));
 const categories = computed(() => [
   ...new Set(store.toolRecords.flatMap((record) => record.tool.categories)),
 ]);
@@ -446,6 +471,7 @@ function providerDiagnostic(providerId: string): string {
   if (!report) return "尚无诊断";
   if (!report.enabled) return "已在设置中停用";
   if (report.errors.length) return report.errors.map((item) => item.summary).join("；");
+  if (!report.status) return "等待刷新";
   if (!report.status?.available) return report.status?.detail ?? "当前不可用";
   return `${report.status.version ?? "版本未知"} · ${formatDate(report.refreshedAt)}`;
 }
@@ -453,10 +479,22 @@ function providerDiagnostic(providerId: string): string {
 function clearFilters(): void {
   searchInput.value = "";
   search.value = "";
+  resetSideFilters();
+}
+
+function resetSideFilters(): void {
   statusFilter.value = "all";
   providerFilter.value = "all";
   categoryFilter.value = "all";
-  includeHidden.value = true;
+  includeHidden.value = false;
+}
+
+function closeFilterBackdrop(event: MouseEvent): void {
+  if (event.target !== filterDialog.value) return;
+  const bounds = filterDialog.value.getBoundingClientRect();
+  if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+    filterDialog.value.close();
+  }
 }
 
 function initialize(): void {
