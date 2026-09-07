@@ -204,37 +204,96 @@ pre {
   gap: 16px;
 }
 
-.topbar-refresh {
-  min-height: 32px;
+.refresh-control {
+  position: relative;
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.topbar-refresh,
+.refresh-menu-toggle {
+  height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  padding: 0 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
+  padding: 0;
+  border: 0;
   color: var(--text);
-  background: var(--panel);
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
+  background: transparent;
   cursor: pointer;
   transition: 140ms ease;
 }
 
-.topbar-refresh:hover:not(:disabled) {
-  border-color: var(--accent);
+.topbar-refresh {
+  width: 36px;
+  border-radius: 6px 0 0 6px;
+}
+
+.refresh-menu-toggle {
+  width: 26px;
+  border-left: 1px solid var(--line);
+  border-radius: 0 6px 6px 0;
+}
+
+.refresh-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.refresh-menu-toggle svg {
+  width: 13px;
+  height: 13px;
+}
+
+.topbar-refresh:hover:not(:disabled),
+.refresh-menu-toggle:hover:not(:disabled),
+.refresh-menu-toggle[aria-expanded="true"] {
   color: var(--accent);
   background: var(--panel-raised);
 }
 
-.topbar-refresh:disabled {
+.topbar-refresh:disabled,
+.refresh-menu-toggle:disabled {
   color: var(--quiet);
-  cursor: wait;
+  cursor: not-allowed;
 }
 
-.topbar-refresh[data-loading="true"] > span:first-child {
+.topbar-refresh[data-loading="true"] .refresh-icon {
   animation: spin 750ms linear infinite;
+}
+
+.refresh-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 160px;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--panel-raised);
+  box-shadow: var(--shadow);
+}
+
+.refresh-menu button {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 11px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.refresh-menu button:hover,
+.refresh-menu button:focus-visible {
+  color: var(--accent);
+  background: rgb(93 225 194 / 10%);
 }
 
 .connection-status {
@@ -293,6 +352,7 @@ pre {
   height: calc(100vh - 64px);
   height: calc(100dvh - 64px);
   min-height: 0;
+  padding-bottom: 16px;
   display: flex;
   flex-direction: column;
 }
@@ -418,6 +478,8 @@ pre {
 
 .filter-sidebar {
   overflow-y: auto;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
 }
 
 .filter-sidebar__header {
@@ -714,12 +776,6 @@ input[type="checkbox"] {
   color: var(--text);
 }
 
-.provider-refreshes {
-  margin-left: auto;
-  display: flex;
-  gap: 8px;
-}
-
 .provider-warning,
 .inline-error,
 .inline-warning,
@@ -962,10 +1018,6 @@ input[type="checkbox"] {
 .risk-pill {
   color: #382506;
   background: var(--warning);
-}
-
-.results-bar .text-button {
-  font-size: 14px;
 }
 
 .selection-bar,
@@ -1725,12 +1777,6 @@ input[type="checkbox"] {
 
   .topbar-refresh {
     width: 30px;
-    min-height: 30px;
-    padding: 0;
-  }
-
-  .topbar-refresh > span:last-child {
-    display: none;
   }
 
   .view {
@@ -1742,6 +1788,7 @@ input[type="checkbox"] {
     height: calc(100vh - 54px);
     height: calc(100dvh - 54px);
     min-height: 0;
+    padding-bottom: 12px;
   }
 
   .tools-layout,
@@ -1769,11 +1816,6 @@ input[type="checkbox"] {
   .tool-card__sources .source-badge {
     min-width: 0;
     padding: 4px 5px;
-  }
-
-  .provider-refreshes {
-    width: 100%;
-    margin-left: 0;
   }
 
   .notifications {

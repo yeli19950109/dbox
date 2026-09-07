@@ -25,6 +25,12 @@ export const useSnapshotStore = defineStore("snapshot", () => {
   let eventsConnected = false;
 
   const toolRecords = computed(() => mapToolRecords(snapshot.value));
+  const providerIds = computed(() => [
+    ...new Set([
+      ...(snapshot.value?.providers.map((provider) => provider.providerId) ?? []),
+      ...toolRecords.value.flatMap((record) => record.providerIds),
+    ]),
+  ]);
 
   function acceptSnapshot(next: SnapshotDto): void {
     snapshot.value = next;
@@ -133,6 +139,7 @@ export const useSnapshotStore = defineStore("snapshot", () => {
     refreshProgress,
     currentRefreshProgress,
     toolRecords,
+    providerIds,
     acceptSnapshot,
     initialize,
     refresh,

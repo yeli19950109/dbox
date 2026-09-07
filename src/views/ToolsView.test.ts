@@ -93,7 +93,7 @@ describe("ToolsView", () => {
     wrapper.unmount();
   });
 
-  it("supports filters, hidden state, keyboard focus and provider-scoped refresh", async () => {
+  it("supports filters, hidden state and keyboard focus", async () => {
     vi.useFakeTimers();
     const snapshot = snapshotWithTools(12);
     snapshot.tools[1]!.hidden = true;
@@ -120,12 +120,6 @@ describe("ToolsView", () => {
     expect(document.activeElement).toBe(close.element);
     await close.trigger("keydown", { key: "Escape" });
 
-    const providerRefresh = wrapper.findAll("button").find((button) => button.text().includes("刷新 npm"));
-    await providerRefresh!.trigger("click");
-    expect(mock.transport.commands.refresh).toHaveBeenCalledWith({
-      scope: { scope: "provider", providerId: "npm" },
-      force: true,
-    });
     wrapper.unmount();
   });
 

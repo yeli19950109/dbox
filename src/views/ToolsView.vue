@@ -96,17 +96,6 @@
             <strong>{{ filteredRecords.length }}</strong> / {{ store.toolRecords.length }} 项
           </span>
           <span v-if="lastChecked">上次检查：{{ lastChecked }}</span>
-          <div v-if="providers.length" class="provider-refreshes" aria-label="按 Provider 刷新">
-            <button
-              v-for="provider in providers"
-              :key="provider"
-              type="button"
-              class="text-button"
-              @click="refreshProvider(provider)"
-            >
-              刷新 {{ providerLabel(provider) }}
-            </button>
-          </div>
         </div>
 
         <div v-if="store.error" class="inline-error" role="alert">
@@ -305,12 +294,7 @@ const updateSearch = useDebounceFn((value: string) => {
 
 watch(searchInput, (value) => void updateSearch(value));
 
-const providers = computed(() => [
-  ...new Set([
-    ...(store.snapshot?.providers.map((provider) => provider.providerId) ?? []),
-    ...store.toolRecords.flatMap((record) => record.providerIds),
-  ]),
-]);
+const providers = computed(() => store.providerIds);
 const providerCounts = computed(() => Object.fromEntries(
   providers.value.map((id) => [id, store.toolRecords.filter((record) => record.providerIds.includes(id)).length]),
 ));
@@ -499,9 +483,6 @@ function closeFilterBackdrop(event: MouseEvent): void {
 
 function initialize(): void {
   void store.initialize().catch(() => undefined);
-}
-function refreshProvider(providerId: string): void {
-  void store.refresh({ scope: "provider", providerId }).catch(() => undefined);
 }
 onMounted(initialize);
 </script>

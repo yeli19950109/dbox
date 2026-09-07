@@ -28,17 +28,7 @@
         </RouterLink>
       </nav>
       <div class="topbar-actions">
-        <button
-          type="button"
-          class="topbar-refresh"
-          :data-loading="snapshot.loading || undefined"
-          :disabled="snapshot.loading"
-          :aria-label="snapshot.loading ? '正在刷新全部工具' : '刷新全部工具'"
-          @click="refreshAll"
-        >
-          <span aria-hidden="true">↻</span>
-          <span>{{ snapshot.loading ? "正在刷新" : "刷新全部" }}</span>
-        </button>
+        <RefreshMenu />
         <div class="connection-status">
           <span class="connection-dot" :data-connected="Boolean(snapshot.snapshot)" aria-hidden="true" />
           <span>{{ snapshot.snapshot ? "后端已连接" : "等待后端" }}</span>
@@ -58,15 +48,12 @@
 import { onBeforeUnmount, onMounted } from "vue";
 import AppErrorBoundary from "./components/AppErrorBoundary.vue";
 import NotificationCenter from "./components/NotificationCenter.vue";
+import RefreshMenu from "./components/RefreshMenu.vue";
 import { useRunsStore } from "./stores/runs";
 import { useSnapshotStore } from "./stores/snapshot";
 
 const snapshot = useSnapshotStore();
 const runs = useRunsStore();
-
-function refreshAll(): void {
-  void snapshot.refresh({ scope: "all" }).catch(() => undefined);
-}
 
 onMounted(() => {
   void snapshot.connectEvents().catch(() => undefined);
