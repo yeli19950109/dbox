@@ -1,7 +1,7 @@
 {
   "name": "dbox",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "bindings:generate": "cargo run --manifest-path src-tauri/Cargo.toml --features bindings --bin export-bindings -- src/bindings.ts",
