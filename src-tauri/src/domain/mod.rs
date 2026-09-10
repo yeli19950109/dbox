@@ -372,11 +372,27 @@ pub struct InvalidRunStatusTransition {
     pub to: RunStatus,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum RunSubject {
+    #[default]
+    ToolUpdate,
+    Skill,
+    Mcp,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Run {
     pub id: RunId,
-    pub tool_id: ToolId,
+    #[serde(default)]
+    pub tool_id: Option<ToolId>,
+    #[serde(default)]
+    pub subject: RunSubject,
+    #[serde(default)]
+    pub operation: Option<String>,
+    #[serde(default)]
+    pub resource_names: Vec<String>,
     pub component_ids: Vec<ComponentId>,
     pub status: RunStatus,
     pub created_at: DateTime<Utc>,

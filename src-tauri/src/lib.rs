@@ -1,14 +1,18 @@
 #[cfg(all(not(debug_assertions), feature = "dev-http"))]
 compile_error!("the dev-http feature is restricted to debug builds");
 
+pub mod agents;
 pub mod api;
 pub mod application;
 pub mod catalog;
 pub mod domain;
 pub mod environment;
 pub mod executor;
+pub mod extensions;
+pub mod mcp;
 pub mod persistence;
 pub mod providers;
+pub mod skills;
 pub mod version;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

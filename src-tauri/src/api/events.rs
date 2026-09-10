@@ -86,12 +86,43 @@ pub struct ToolStateEventDto {
     pub tool_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+#[tauri_specta(event_name = "skills-changed")]
+pub struct ExtensionChangedEventDto {
+    pub revision: String,
+    pub sequence: String,
+    pub run_id: String,
+    pub resource_ids: Vec<String>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+#[tauri_specta(event_name = "mcp-changed")]
+pub struct McpChangedEventDto {
+    pub revision: String,
+    pub sequence: String,
+    pub run_id: String,
+    pub resource_ids: Vec<String>,
+}
+impl From<ExtensionChangedEventDto> for McpChangedEventDto {
+    fn from(e: ExtensionChangedEventDto) -> Self {
+        Self {
+            revision: e.revision,
+            sequence: e.sequence,
+            run_id: e.run_id,
+            resource_ids: e.resource_ids,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApiEvent {
     RefreshProgress(RefreshProgressEventDto),
     RunState(RunStateEventDto),
     RunOutput(RunOutputEventDto),
     ToolState(ToolStateEventDto),
+    SkillsChanged(ExtensionChangedEventDto),
+    McpChanged(McpChangedEventDto),
 }
 
 pub trait ApiEventEmitter: Send + Sync {
@@ -116,6 +147,8 @@ impl ApiEventEmitter for TauriApiEventEmitter {
             ApiEvent::RefreshProgress(event) => event.emit(&self.handle),
             ApiEvent::RunState(event) => event.emit(&self.handle),
             ApiEvent::RunOutput(event) => event.emit(&self.handle),
+            ApiEvent::SkillsChanged(event) => event.emit(&self.handle),
+            ApiEvent::McpChanged(event) => event.emit(&self.handle),
             ApiEvent::ToolState(event) => event.emit(&self.handle),
         };
         result.map_err(|error| error.to_string())

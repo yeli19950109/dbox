@@ -1,4 +1,20 @@
 import type {
+  AgentTarget,
+  Diagnostic,
+  ExtensionBackup,
+  ExtensionPlan,
+  ExtensionResult,
+  ExtensionStarted,
+  McpScan,
+  McpSnapshot,
+  SearchSkill,
+  SkillDiscovery,
+  SkillUpdate,
+  SkillsSnapshot,
+  ExtensionChangedEventDto,
+  McpChangedEventDto,
+} from "../bindings";
+import type {
   ApiErrorDto,
   CancelResponseDto,
   ConfirmResponseDto,
@@ -15,7 +31,10 @@ import type {
   ToolStateEventDto,
   UpdatePlanDto,
 } from "../bindings";
-import { commands as generatedCommands, events as generatedEvents } from "../bindings";
+import {
+  commands as generatedCommands,
+  events as generatedEvents,
+} from "../bindings";
 import type { ApiTransport } from "./transport";
 
 const HTTP_PREFIX = "/__dbox_http";
@@ -32,7 +51,10 @@ type BrowserEvent<T> = {
 
 type BrowserEventCallback<T> = (event: BrowserEvent<T>) => void;
 
-async function command<T>(name: string, request?: unknown): Promise<CommandResult<T>> {
+async function command<T>(
+  name: string,
+  request?: unknown,
+): Promise<CommandResult<T>> {
   const response = await fetch(`${HTTP_PREFIX}/commands/${name}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -50,16 +72,21 @@ async function command<T>(name: string, request?: unknown): Promise<CommandResul
   try {
     payload = JSON.parse(body);
   } catch (reason) {
-    throw new Error(`Dev HTTP command ${name} returned invalid JSON`, { cause: reason });
+    throw new Error(`Dev HTTP command ${name} returned invalid JSON`, {
+      cause: reason,
+    });
   }
   if (!isCommandResult<T>(payload)) {
-    throw new Error(`Dev HTTP command ${name} returned an invalid response envelope`);
+    throw new Error(
+      `Dev HTTP command ${name} returned an invalid response envelope`,
+    );
   }
   return payload;
 }
 
 function isCommandResult<T>(value: unknown): value is CommandResult<T> {
-  if (typeof value !== "object" || value === null || !("status" in value)) return false;
+  if (typeof value !== "object" || value === null || !("status" in value))
+    return false;
   if (value.status === "ok") return "data" in value;
   if (value.status !== "error" || !("error" in value)) return false;
   const error = value.error;
@@ -85,25 +112,45 @@ function waitForOpen(source: EventSource): Promise<void> {
       source.removeEventListener("open", opened);
       source.removeEventListener("error", failed);
     };
-    const opened = () => { cleanup(); resolve(); };
-    const failed = () => { cleanup(); reject(new Error("实时事件连接失败")); };
-    const timeout = setTimeout(() => { cleanup(); reject(new Error("实时事件连接超时")); }, 10_000);
+    const opened = () => {
+      cleanup();
+      resolve();
+    };
+    const failed = () => {
+      cleanup();
+      reject(new Error("实时事件连接失败"));
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("实时事件连接超时"));
+    }, 10_000);
     source.addEventListener("open", opened);
     source.addEventListener("error", failed);
   });
 }
 
 function eventChannel<T>(eventName: string) {
-  const listen = async (callback: BrowserEventCallback<T>): Promise<() => void> => {
-    const stream = eventStream ??= {
+  const listen = async (
+    callback: BrowserEventCallback<T>,
+  ): Promise<() => void> => {
+    const stream = (eventStream ??= {
       source: new EventSource(`${HTTP_PREFIX}/events`),
       subscribers: 0,
-    };
+    });
+    if (stream.subscribers === 0) {
+      stream.source.addEventListener("open", () =>
+        window.dispatchEvent(new Event("dbox:reconnected")),
+      );
+    }
     stream.subscribers += 1;
     const handler = (event: Event) => {
       const message = event as MessageEvent<string>;
       try {
-        callback({ event: eventName, id: 0, payload: JSON.parse(message.data) as T });
+        callback({
+          event: eventName,
+          id: 0,
+          payload: JSON.parse(message.data) as T,
+        });
       } catch (reason) {
         console.error(`Ignored invalid ${eventName} Dev HTTP event`, reason);
       }
@@ -122,7 +169,9 @@ function eventChannel<T>(eventName: string) {
     return cleanup;
   };
 
-  const once = async (callback: BrowserEventCallback<T>): Promise<() => void> => {
+  const once = async (
+    callback: BrowserEventCallback<T>,
+  ): Promise<() => void> => {
     let cleanup: (() => void) | undefined;
     let received = false;
     cleanup = await listen((event) => {
@@ -161,17 +210,66 @@ const httpCommands = {
   runLog: (request: Parameters<typeof generatedCommands.runLog>[0]) =>
     command<RunLogDto>("run_log", request),
   settings: () => command<SettingsDocumentDto>("settings"),
-  saveSettings: (request: Parameters<typeof generatedCommands.saveSettings>[0]) =>
-    command<SettingsDocumentDto>("save_settings", request),
-  validateManifest: (request: Parameters<typeof generatedCommands.validateManifest>[0]) =>
-    command<ManifestValidationDto>("validate_manifest", request),
-  readManifest: (request: Parameters<typeof generatedCommands.readManifest>[0]) =>
-    command<ManifestDocumentDto>("read_manifest", request),
-  saveManifest: (request: Parameters<typeof generatedCommands.saveManifest>[0]) =>
-    command<SavedManifestDto>("save_manifest", request),
+  saveSettings: (
+    request: Parameters<typeof generatedCommands.saveSettings>[0],
+  ) => command<SettingsDocumentDto>("save_settings", request),
+  validateManifest: (
+    request: Parameters<typeof generatedCommands.validateManifest>[0],
+  ) => command<ManifestValidationDto>("validate_manifest", request),
+  readManifest: (
+    request: Parameters<typeof generatedCommands.readManifest>[0],
+  ) => command<ManifestDocumentDto>("read_manifest", request),
+  saveManifest: (
+    request: Parameters<typeof generatedCommands.saveManifest>[0],
+  ) => command<SavedManifestDto>("save_manifest", request),
+  listAgentTargets: () => command<AgentTarget[]>("list_agent_targets"),
+  saveAgentTargets: (
+    request: Parameters<typeof generatedCommands.saveAgentTargets>[0],
+  ) => command<AgentTarget[]>("save_agent_targets", request),
+  listSkills: () => command<SkillsSnapshot>("list_skills"),
+  listSkillSources: () => command<SkillsSnapshot>("list_skill_sources"),
+  saveSkillSource: (
+    request: Parameters<typeof generatedCommands.saveSkillSource>[0],
+  ) => command<SkillsSnapshot>("save_skill_source", request),
+  deleteSkillSource: (
+    request: Parameters<typeof generatedCommands.deleteSkillSource>[0],
+  ) => command<SkillsSnapshot>("delete_skill_source", request),
+  discoverSkills: (
+    request: Parameters<typeof generatedCommands.discoverSkills>[0],
+  ) => command<SkillDiscovery>("discover_skills", request),
+  searchSkills: (
+    request: Parameters<typeof generatedCommands.searchSkills>[0],
+  ) => command<SearchSkill[]>("search_skills", request),
+  scanSkillImports: () => command<SkillDiscovery>("scan_skill_imports"),
+  checkSkillUpdates: (
+    request: Parameters<typeof generatedCommands.checkSkillUpdates>[0],
+  ) => command<SkillUpdate[]>("check_skill_updates", request),
+  listSkillBackups: () => command<ExtensionBackup[]>("list_skill_backups"),
+  previewSkillOperation: (
+    request: Parameters<typeof generatedCommands.previewSkillOperation>[0],
+  ) => command<ExtensionPlan>("preview_skill_operation", request),
+  listMcpServers: () => command<McpSnapshot>("list_mcp_servers"),
+  scanMcpImports: () => command<McpScan>("scan_mcp_imports"),
+  validateMcpServer: (
+    request: Parameters<typeof generatedCommands.validateMcpServer>[0],
+  ) => command<Diagnostic[]>("validate_mcp_server", request),
+  previewMcpOperation: (
+    request: Parameters<typeof generatedCommands.previewMcpOperation>[0],
+  ) => command<ExtensionPlan>("preview_mcp_operation", request),
+  confirmExtensionOperation: async (
+    request: Parameters<typeof generatedCommands.confirmExtensionOperation>[0],
+  ) => {
+    if (eventStream) await waitForOpen(eventStream.source);
+    return command<ExtensionStarted>("confirm_extension_operation", request);
+  },
+  extensionOperationResult: (
+    request: Parameters<typeof generatedCommands.extensionOperationResult>[0],
+  ) => command<ExtensionResult>("extension_operation_result", request),
 } satisfies typeof generatedCommands;
 
 const httpEvents = {
+  skillsChanged: eventChannel<ExtensionChangedEventDto>("skills-changed"),
+  mcpChanged: eventChannel<McpChangedEventDto>("mcp-changed"),
   refreshProgress: eventChannel<RefreshProgressEventDto>("refresh-progress"),
   runOutput: eventChannel<RunOutputEventDto>("run-output"),
   runState: eventChannel<RunStateEventDto>("run-state"),

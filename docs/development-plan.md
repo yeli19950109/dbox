@@ -138,8 +138,9 @@ src-tauri/src/
   executor/            # Tokio/process-wrap 等开源库的薄适配
   persistence/         # settings、cache、history
   environment/         # GUI 环境/PATH 解析与诊断
-  integrations/
-    skills_cli/        # 后续对 npx skills 的薄适配，不实现 Skill 文件管理
+  agents/              # 后续 Agent 路径和能力适配
+  skills/              # 后续原生 Skill 内容、来源和部署管理
+  mcp/                 # 后续 MCP 配置管理与应用格式适配
 src-tauri/resources/catalog/
   pi.toml              # 特殊能力示例，不是工具白名单
 tests/fixtures/bin/    # 集成测试使用的假命令
@@ -158,7 +159,7 @@ tests/fixtures/bin/    # 集成测试使用的假命令
 5. `<app_data_dir>/state.json`：检测缓存、上次成功版本和运行摘要，使用 `atomic-write-file` 承担同目录临时文件、同步和原子替换；
 6. `<app_log_dir>/runs/*.jsonl`：逐次运行的结构化日志，按数量和总大小轮转。
 
-所有目录通过 Tauri path API 获取，业务代码不硬编码 macOS 绝对路径。MVP 先使用文件持久化；当需要复杂查询、计划任务或大量历史记录时再评估 SQLite。
+所有目录通过 Tauri path API 获取，业务代码不硬编码 macOS 绝对路径。采用本地文件持久化，新增 Skill/MCP 元数据分别直接保存为 skills.json、mcp.json。按个人本地使用规模设计，不规划 SQLite 等数据库或大型查询系统。
 
 ### 6.2 通用安装项自动建模
 
@@ -580,77 +581,36 @@ MVP 只有同时满足以下条件才算完成：
 12. 前端不能绕过 Provider/manifest 和 UpdatePlan 执行任意命令。
 13. 配置和运行日志均只保存在本机，敏感信息经过脱敏。
 
-## 15. Skill 管理集成（后续）
+## 15. Skill 与 MCP 管理集成
 
-Skill 管理完全委托给开源 [`skills` CLI](https://github.com/vercel-labs/skills)。dbox 不自行扫描 Agent 目录、不解析或修改 skills lock 文件、不复制/链接 Skill，也不实现 Agent 兼容矩阵、更新算法或删除逻辑。`npx skills` 是这部分能力的唯一执行后端，dbox 只提供桌面 UI、参数构造、执行确认、日志和结果展示。
+完整调研、能力对照和分阶段计划见 [Skill 与 MCP 管理接入计划](skills-mcp-integration-plan.md)。2026-09-10 根据用户要求重新比较 `reference-only/skills` 与 `reference-only/cc-switch`，本节替代原先的 `npx skills` 唯一后端方案；已完成用户级原生管理实现，使用和已知边界见 [管理说明](skills-mcp-management.md)，实现决策见 [ADR 0004](adr/0004-native-extensions.md)。
 
-官方 CLI 已提供安装、列举、搜索、更新和移除能力，并负责不同 Agent、global/project scope、copy/symlink 等细节。dbox 应跟随其公开 CLI contract，而不是依赖仓库内部模块或未公开文件格式。参考：[Skills CLI 官方文档](https://www.skills.sh/docs/cli)和[官方 README](https://github.com/vercel-labs/skills#readme)。
+### 15.1 选型与范围
 
-### 15.1 集成边界
+采用参考 cc-switch 的 Rust 原生 Skill 管理：统一技能库、应用分发、已有安装导入、独立更新检查、备份恢复。MCP 采用独立服务及各应用配置适配器。首个完整版本支持 Claude Code、Codex、Gemini CLI 的用户级管理，项目级和更多 Agent 按后续阶段扩展。
 
-dbox 负责：
+CLI 已支持基础安装/移除、多 Agent、JSON 列表、指定 Skill 更新和远程归档，不能把这些列为缺失能力。但保留技能库的全部停用、独立检查、安装接管与备份恢复仍需额外管理逻辑。本地 `reference-only/skills`（版本字段 `1.5.25`）中，`check` 与 `update` 分支调用同一更新函数，不能沿用原先的只读检查假设。逐项源码依据见接入计划第 2 节。
 
-- 定位 `npx`、检查 Node/npm 环境，并显示环境诊断；
-- 使用 `program = "npx"` 和独立 `args[]` 构造命令，不经过 shell；
-- 将 source、skill、agent、scope 等 UI 选择映射为公开 CLI 参数；
-- 执行前展示完整命令，执行中流式展示输出，记录退出码、超时和取消；
-- 优先消费官方稳定的 JSON 输出；没有机器可读输出时展示原始 CLI 结果并把结构化状态标为 unknown；
-- 记录 dbox 自己的 Run 历史，但不复制 `skills` CLI 的状态数据库。
+### 15.2 实现边界
 
-dbox 不负责：
+- Skill/MCP 元数据分别用 skills.json、mcp.json 保存，整体读取、内存筛选、原子写回；不使用 SQLite 等数据库、ORM 或搜索索引。
+- Skill 内容和来源保存在 dbox 私有数据目录；Agent 目录是受管理的部署目标，全部停用不删除技能库。
+- 已有 Skill 先只读扫描并导入快照，显式接管后才允许修改原部署；来源未知时不猜测远程更新地址。
+- 不与 CLI、cc-switch 同时写同一份管理状态；外部 lock 只可通过独立的兼容导入器读取，不写回。
+- MCP 导入不反向写应用配置；修改按应用格式生成 diff，只变更计划中的服务器并保留无关字段。
+- 文件操作和外部命令都经后端计划确认；使用指纹检测外部修改，普通文件备份、manifest.json 与现有 Run 历史处理部分失败和中断，不建设额外事务或版本存储系统。
+- 下载、解压、配置编辑等基础设施优先使用成熟库，避免手写解析器或引入整套 cc-switch 框架。
 
-- 直接读写 `.agents/skills`、各 Agent 专用 skills 目录或符号链接；
-- 直接读写 `.skill-lock.json`、`skills-lock.json` 或其他 CLI 内部状态；
-- 自己比较 Skill 文件 hash、下载仓库、解压归档或判断更新；
-- 自己维护 Codex、Pi、Claude 等 Agent 的安装路径和兼容规则；
-- 绕过 CLI 实现安装、更新、移除、复制或链接；
-- 在 CLI 未提供某能力时通过操作内部文件“补齐”功能。
+### 15.3 接入顺序
 
-### 15.2 命令映射
+1. Agent 路径/capability、Skill/MCP 模型及持久化。
+2. 扩展计划、Run 和执行分派，保留原工具更新行为。
+3. Skill 本地导入、接管、启停、卸载与备份恢复。
+4. Skill 来源发现、安装、独立检查与更新。
+5. MCP 读取、导入、转换、预览与写入。
+6. 两类 Vue 管理界面、Tauri/HTTP 契约、集成验收。
 
-具体参数以 dbox 集成时锁定并测试过的 `skills` CLI 版本为准，首版计划映射以下公开命令：
-
-| dbox 操作 | CLI |
-| --- | --- |
-| 查看已安装 Skill | `npx skills list` / `npx skills list --json` |
-| 只看 global | `npx skills list --global` |
-| 按 Agent 筛选 | `npx skills list --agent <agent>` |
-| 查看来源中的 Skill | `npx skills add <source> --list` |
-| 搜索 | `npx skills find <query>` |
-| 安装 | `npx skills add <source> --skill <skill> --agent <agent>` |
-| 安装到 global | 在 add 命令加入 `--global` |
-| 检查更新 | `npx skills check` |
-| 更新 | `npx skills update [skills]` |
-| 移除 | `npx skills remove [skills]` |
-
-所有改变状态的命令仍通过 dbox 的 `CommandPlan` 预览和确认。不要默认传 `--yes` 绕过 dbox 确认；若非交互执行确实需要该参数，只能在用户确认后由执行计划加入。项目级操作必须把用户明确选择的 workspace 作为 `cwd`，global 操作使用 CLI 的 `--global` 参数。
-
-### 15.3 CLI 版本与兼容性
-
-- 启动集成前运行公开的版本/帮助命令并进行 capability detection，不能假设所有本机缓存版本都支持同一参数；
-- 记录已验证的最小/最大兼容版本，遇到不兼容版本时提示更新 CLI 集成，不解析未知输出；
-- `npx` 可能首次联网下载 package，预览中必须显示网络提示并设置合理超时；
-- 不只依据进程退出码判定 Skill 更新成功；若 CLI 输出包含逐项失败，应解析为 partial/failed，无法可靠解析则标为 unknown 并保留原始日志；
-- `skills check` 的纯读取语义和输出格式需要对目标版本做 fixture 测试；若无法保证无副作用，不在后台自动调用，只允许用户手动触发；
-- dbox 自身不收集遥测。调用 CLI 时默认设置其公开的 `DISABLE_TELEMETRY=1`，并在设置页说明该行为；
-- 若官方 CLI 将来提供稳定 API/JSON schema，优先升级适配层，不保留两套 Skill 管理实现。
-
-### 15.4 分阶段接入
-
-1. **只读阶段：** 环境诊断、`list --json`、global/project/Agent 筛选和原始输出回退。
-2. **更新阶段：** 用户手动执行 `check`/`update`，复用 CommandPlan、日志和 Run 状态机。
-3. **安装/移除阶段：** 接入 `find`、`add`、`remove`，明确 source、Agent、scope 与 workspace。
-4. **体验增强：** 在不绕过 CLI 的前提下，增加收藏来源、最近使用参数和错误恢复提示。
-
-### 15.5 对当前 MVP 的架构要求
-
-MVP 暂不实现 Skill 页面，但现在就要做到：
-
-- 外部集成使用通用的 CLI adapter 接口，不能把 Provider Registry 和 Run/Plan 写死为 npm/brew；
-- 前端导航和 store 不把 Tool 列表当作整个应用唯一资源；
-- `CommandPlan` 支持显式 `cwd`、环境变量、联网提示和 partial/unknown 结果；
-- 执行层能调用 `npx` 的绝对路径并正确处理首次下载、长时间输出和取消；
-- Skill 集成只增加 `integrations/skills_cli`，不引入自研 Skill 文件管理模块。
+细分任务与验收依赖以接入计划 P0–P7 为准。现有 T21/T22 调整为原生 Skill 后端和界面，不再实施 CLI 薄适配。
 
 ## 16. MVP 之后的候选能力
 
@@ -658,7 +618,7 @@ MVP 暂不实现 Skill 页面，但现在就要做到：
 
 1. 定时检查和系统通知，但仍默认人工确认更新；
 2. 工具安装、卸载、版本固定和回滚；
-3. 通过 `npx skills` 接入 Skill 只读清单，随后按第 15 节加入检查、更新、安装和移除；
+3. 按第 15 节接入原生 Skill 管理与 MCP 配置管理；
 4. mise、rustup、cargo_install 和 direct Provider；
 5. catalog 在线签名更新和社区工具清单；
 6. Linux 支持；
@@ -673,7 +633,8 @@ MVP 暂不实现 Skill 页面，但现在就要做到：
 
 - T01–T16：Rust 基础、领域、执行器、Provider、应用服务、队列、Tauri API 和后端验收门；
 - T17–T20：后端门禁通过后的图形界面与发布；
-- T21–T22：只通过 `npx skills` 实现的后续 Skill 集成与界面；
-- T23–T26：mise、rustup、Cargo Install 和 Direct Provider。
+- T21–T22：参考 cc-switch 的原生 Skill 管理后端与界面；
+- T23–T26：mise、rustup、Cargo Install 和 Direct Provider；
+- Skill/MCP 共享基础及 MCP 后端、界面和集成验收：见 [接入计划 P0–P7](skills-mcp-integration-plan.md#9-分阶段任务与验收)。
 
 每个 Rust 任务必须在同一任务中完成相应单元/fixture/集成测试。T16 未标记 Completed 前，T17–T19 保持 Blocked。

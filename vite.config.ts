@@ -7,7 +7,9 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [vue()],
+  optimizeDeps: { entries: ["index.html"] },
   test: {
+    include: ["src/**/*.test.ts"],
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
@@ -25,7 +27,7 @@ export default defineConfig(async () => ({
     host: host || false,
     proxy: {
       "/__dbox_http": {
-        target: "http://127.0.0.1:1430",
+        target: process.env.DBOX_DEV_HTTP_URL || "http://127.0.0.1:1430",
       },
     },
     hmr: host
@@ -37,7 +39,7 @@ export default defineConfig(async () => ({
       : undefined,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      ignored: ["**/src-tauri/**", "**/reference-only/**"],
     },
   },
 }));

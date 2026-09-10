@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::domain::{Run, RunId, RunStatus, RunSummary, ToolId};
 use crate::executor::{CommandExecutor, ConfirmedPlan, ExecutionResult};
 use crate::persistence::RunLogEntry;
-use crate::persistence::{PersistenceStore, StoreError, StoreErrorKind};
+use crate::persistence::{PersistenceStore, StoreError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -246,7 +246,10 @@ impl RunQueue {
             };
             let run = Run {
                 id: run_id.clone(),
-                tool_id: descriptor.tool_id.clone(),
+                tool_id: Some(descriptor.tool_id.clone()),
+                subject: Default::default(),
+                operation: None,
+                resource_names: vec![],
                 component_ids: vec![plan.plan().component_id.clone()],
                 status: RunStatus::Queued,
                 created_at: now,
@@ -589,10 +592,7 @@ impl RunQueue {
 
     async fn persist_runs(&self, records: &[Run]) -> Result<(), RunQueueError> {
         let _persistence = self.persistence.lock().await;
-        let mut last_error = None;
-        for _ in 0..3 {
-            let loaded = self.store.load_state()?;
-            let mut cached = loaded.value;
+        self.store.update_cached_state(|cached| {
             for record in records {
                 if let Some(existing) = cached.runs.iter_mut().find(|run| run.id == record.id) {
                     existing.clone_from(record);
@@ -600,15 +600,8 @@ impl RunQueue {
                     cached.runs.push(record.clone());
                 }
             }
-            match self.store.save_state(&loaded.revision, &cached) {
-                Ok(_) => return Ok(()),
-                Err(error) if error.kind == StoreErrorKind::RevisionConflict => {
-                    last_error = Some(error);
-                }
-                Err(error) => return Err(error.into()),
-            }
-        }
-        Err(last_error.expect("a revision conflict was recorded").into())
+        })?;
+        Ok(())
     }
 }
 
@@ -665,7 +658,9 @@ fn recover_unfinished(
                 error: Some("application restarted before the run completed".into()),
             });
             recovered.push(run.id.clone());
-            tools.insert(run.tool_id.clone());
+            if let Some(tool) = &run.tool_id {
+                tools.insert(tool.clone());
+            }
         }
     }
     if !recovered.is_empty() {

@@ -15,7 +15,7 @@ use thiserror::Error;
 use crate::domain::{ComponentId, Installation, ProviderId, Run, RunId, StrategyId, Tool, ToolId};
 
 pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
-pub const STATE_SCHEMA_VERSION: u32 = 1;
+pub const STATE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppPaths {
@@ -216,11 +216,27 @@ struct StateDocument {
 #[derive(Debug, Clone)]
 pub struct PersistenceStore {
     paths: AppPaths,
+    state_write: std::sync::Arc<std::sync::Mutex<()>>,
 }
 
 impl PersistenceStore {
     pub fn new(paths: AppPaths) -> Self {
-        Self { paths }
+        Self {
+            paths,
+            state_write: Default::default(),
+        }
+    }
+
+    pub fn update_cached_state(
+        &self,
+        update: impl FnOnce(&mut CachedState),
+    ) -> Result<Revision, StoreError> {
+        let _guard = self.state_write.lock().expect("state write mutex");
+        let loaded = self.load_state()?;
+        let mut state = loaded.value;
+        update(&mut state);
+        self.save_state(&loaded.revision, &state)
+            .map(|v| v.revision)
     }
 
     pub fn paths(&self) -> &AppPaths {
@@ -599,8 +615,16 @@ fn migrate_settings_document(
 fn migrate_state_document(
     path: &Path,
     found: u32,
-    _document: serde_json::Value,
+    mut document: serde_json::Value,
 ) -> Result<StateDocument, StoreError> {
+    if found == 1 {
+        document["schema_version"] = serde_json::json!(STATE_SCHEMA_VERSION);
+        return serde_json::from_value(document).map_err(|_| StoreError {
+            path: path.into(),
+            kind: StoreErrorKind::Corrupt,
+            message: "invalid legacy state".into(),
+        });
+    }
     unsupported_schema(path, found, STATE_SCHEMA_VERSION)
 }
 

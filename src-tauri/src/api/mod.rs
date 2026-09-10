@@ -1,4 +1,6 @@
 mod commands;
+mod extension_commands;
+pub use extension_commands::*;
 #[cfg(all(debug_assertions, feature = "dev-http"))]
 mod dev_http;
 mod dto;
@@ -31,13 +33,33 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             save_settings,
             validate_manifest,
             read_manifest,
-            save_manifest
+            save_manifest,
+            list_agent_targets,
+            save_agent_targets,
+            list_skills,
+            list_skill_sources,
+            save_skill_source,
+            delete_skill_source,
+            discover_skills,
+            search_skills,
+            scan_skill_imports,
+            check_skill_updates,
+            list_skill_backups,
+            preview_skill_operation,
+            list_mcp_servers,
+            scan_mcp_imports,
+            validate_mcp_server,
+            preview_mcp_operation,
+            confirm_extension_operation,
+            extension_operation_result
         ])
         .events(collect_events![
             RefreshProgressEventDto,
             RunStateEventDto,
             RunOutputEventDto,
-            ToolStateEventDto
+            ToolStateEventDto,
+            ExtensionChangedEventDto,
+            McpChangedEventDto
         ])
 }
 

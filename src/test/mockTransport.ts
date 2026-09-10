@@ -2,6 +2,8 @@ import { vi } from "vitest";
 import type { ApiTransport } from "../api/transport";
 import type {
   ApiErrorDto,
+  ExtensionChangedEventDto,
+  McpChangedEventDto,
   RefreshProgressEventDto,
   RunOutputEventDto,
   RunStateEventDto,
@@ -24,6 +26,8 @@ export function apiError(
 }
 
 type EventPayloads = {
+  skillsChanged: ExtensionChangedEventDto;
+  mcpChanged: McpChangedEventDto;
   refreshProgress: RefreshProgressEventDto;
   runOutput: RunOutputEventDto;
   runState: RunStateEventDto;
@@ -75,12 +79,22 @@ export function createMockTransport(
       ok({ fileName: request.fileName, revision: null, contents: null }),
     ),
     saveManifest: vi.fn(),
+    listAgentTargets: vi.fn(() => ok([])),
+    saveAgentTargets: vi.fn(() => ok([])),
+    listSkills: vi.fn(() => ok({ revision: "missing", skills: [], sources: [] })),
+    listSkillSources: vi.fn(() => ok({ revision: "missing", skills: [], sources: [] })),
+    listSkillBackups: vi.fn(() => ok([])),
+    listMcpServers: vi.fn(() => ok({ revision: "missing", servers: [] })),
+    scanSkillImports: vi.fn(() => ok({ candidates: [], errors: [], checkedAt: "" })),
+    scanMcpImports: vi.fn(() => ok({ candidates: [], errors: [] })),
     ...commandOverrides,
   } as ApiTransport["commands"];
 
   const transport: ApiTransport = {
     commands: baseCommands,
     events: {
+      skillsChanged: channel("skillsChanged"),
+      mcpChanged: channel("mcpChanged"),
       refreshProgress: channel("refreshProgress"),
       runOutput: channel("runOutput"),
       runState: channel("runState"),

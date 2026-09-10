@@ -34,6 +34,7 @@ use super::events::{
 };
 
 pub struct ApiService {
+    pub extensions: Arc<crate::extensions::ExtensionService>,
     application: Arc<ApplicationService>,
     store: Arc<PersistenceStore>,
     emitter: Arc<dyn ApiEventEmitter>,
@@ -47,13 +48,58 @@ impl ApiService {
         store: Arc<PersistenceStore>,
         emitter: Arc<dyn ApiEventEmitter>,
     ) -> Self {
+        let agents =
+            crate::agents::AgentRegistry::isolated(store.paths().data_dir.join("agent-fixtures"));
+        let extensions = Arc::new(crate::extensions::ExtensionService::new(
+            Arc::clone(&store),
+            agents,
+            Arc::clone(&emitter),
+        ));
         Self {
+            extensions,
             application,
             store,
             emitter,
             active_runs: Mutex::new(BTreeMap::new()),
             event_sequence: AtomicU64::new(0),
         }
+    }
+
+    #[cfg(all(debug_assertions, feature = "dev-http"))]
+    pub fn isolated(
+        paths: AppPaths,
+        agent_home: PathBuf,
+        emitter: Arc<dyn ApiEventEmitter>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let store = Arc::new(PersistenceStore::new(paths));
+        let event_sink = Arc::new(BufferedExecutionEventSink::new(
+            Arc::clone(&emitter),
+            32,
+            Duration::from_millis(50),
+        ));
+        let executor = CommandExecutor::new(Some(Arc::clone(&store)), event_sink, 64 * 1024);
+        let environment = Arc::new(ResolverApplicationEnvironment::new(
+            EnvironmentResolver::from_current_process()?,
+        ));
+        let application = Arc::new(ApplicationService::new(
+            Arc::new(ProviderRegistry::new()),
+            crate::catalog::Catalog::default(),
+            Arc::clone(&store),
+            executor,
+            environment,
+            ApplicationServiceOptions::default(),
+        )?);
+        let extensions = Arc::new(crate::extensions::ExtensionService::new(
+            Arc::clone(&store),
+            crate::agents::AgentRegistry::isolated(agent_home),
+            Arc::clone(&emitter),
+        ));
+        extensions
+            .recover()
+            .map_err(|e| std::io::Error::other(e.message))?;
+        let mut service = Self::new(application, store, emitter);
+        service.extensions = extensions;
+        Ok(service)
     }
 
     pub fn production(
@@ -104,7 +150,17 @@ impl ApiService {
             environment,
             ApplicationServiceOptions::default(),
         )?);
-        Ok(Self::new(application, store, emitter))
+        let extensions = Arc::new(crate::extensions::ExtensionService::new(
+            Arc::clone(&store),
+            crate::agents::AgentRegistry::production(),
+            Arc::clone(&emitter),
+        ));
+        extensions
+            .recover()
+            .map_err(|e| std::io::Error::other(e.message))?;
+        let mut service = Self::new(application, store, emitter);
+        service.extensions = extensions;
+        Ok(service)
     }
 
     pub async fn snapshot(&self) -> Result<SnapshotDto, ApiErrorDto> {
@@ -229,6 +285,12 @@ impl ApiService {
     ) -> Result<CancelResponseDto, ApiErrorDto> {
         let run_id = RunId::new(request.run_id.clone())
             .map_err(|error| invalid_field("runId", error.to_string()))?;
+        if self.extensions.cancel(run_id.as_str()) {
+            return Ok(CancelResponseDto {
+                run_id: run_id.to_string(),
+                disposition: CancelDispositionDto::CancellationRequested,
+            });
+        }
         if let Some(cancellation) = self.active_runs.lock().await.get(&run_id).cloned() {
             cancellation.cancel();
             return Ok(CancelResponseDto {

@@ -253,20 +253,24 @@ async fn queued_cancel_never_starts_and_same_tool_items_never_overlap() {
 async fn wait_for_pid_files(prefix: &Path) -> (i32, i32) {
     let parent_file = PathBuf::from(format!("{}.parent", prefix.display()));
     let child_file = PathBuf::from(format!("{}.child", prefix.display()));
-    wait_for_file(&parent_file).await;
-    wait_for_file(&child_file).await;
-    (
-        fs::read_to_string(parent_file)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap(),
-        fs::read_to_string(child_file)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap(),
-    )
+    // A redirected printf creates the file before writing the PID. Wait for a
+    // complete numeric payload rather than racing the file's creation.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let parent = fs::read_to_string(&parent_file)
+                .ok()
+                .and_then(|s| s.trim().parse::<i32>().ok());
+            let child = fs::read_to_string(&child_file)
+                .ok()
+                .and_then(|s| s.trim().parse::<i32>().ok());
+            if let (Some(parent), Some(child)) = (parent, child) {
+                return (parent, child);
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("fixture writes both process IDs")
 }
 
 fn process_exists(pid: i32) -> bool {
@@ -324,7 +328,10 @@ impl RunRecoveryHandler for RecordingRecoveryHandler {
 fn persisted_run(id: &str, tool: &str, status: RunStatus) -> Run {
     Run {
         id: RunId::new(id).unwrap(),
-        tool_id: ToolId::new(tool).unwrap(),
+        tool_id: Some(ToolId::new(tool).unwrap()),
+        subject: Default::default(),
+        operation: None,
+        resource_names: vec![],
         component_ids: vec![ComponentId::new("core").unwrap()],
         status,
         created_at: Utc::now(),

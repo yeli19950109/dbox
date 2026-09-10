@@ -816,7 +816,10 @@ impl ApplicationService {
         };
         let run = Run {
             id: run_id,
-            tool_id: plan.tool_id.clone(),
+            tool_id: Some(plan.tool_id.clone()),
+            subject: Default::default(),
+            operation: None,
+            resource_names: vec![],
             component_ids: vec![plan.component_id.clone()],
             status: execution.status,
             created_at: execution.started_at,
@@ -1020,17 +1023,16 @@ impl ApplicationService {
         run: Option<Run>,
         installations: Option<&BTreeMap<InstallationId, Installation>>,
     ) -> Result<Revision, ApplicationError> {
-        let loaded = self.store.load_state()?;
-        let mut cached = loaded.value;
-        cached.tools = tools.to_vec();
-        if let Some(installations) = installations {
-            cached.installations = installations.values().cloned().collect();
-        }
-        cached.last_refresh_at = refreshed_at;
-        if let Some(run) = run {
-            cached.runs.push(run);
-        }
-        Ok(self.store.save_state(&loaded.revision, &cached)?.revision)
+        Ok(self.store.update_cached_state(|cached| {
+            cached.tools = tools.to_vec();
+            if let Some(installations) = installations {
+                cached.installations = installations.values().cloned().collect();
+            }
+            cached.last_refresh_at = refreshed_at;
+            if let Some(run) = run {
+                cached.runs.push(run);
+            }
+        })?)
     }
 }
 

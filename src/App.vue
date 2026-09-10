@@ -24,8 +24,9 @@
         <RouterLink to="/skills">
           <span aria-hidden="true">✦</span>
           Skills
-          <small>soon</small>
+
         </RouterLink>
+        <RouterLink to="/mcp"><span aria-hidden="true">⊞</span>MCP</RouterLink>
       </nav>
       <div class="topbar-actions">
         <RefreshMenu />

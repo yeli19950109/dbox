@@ -282,9 +282,11 @@ export const useRunsStore = defineStore("runs", () => {
   }
 
   async function retry(run: RunDto): Promise<UpdatePlanDto[]> {
+    if (!run.toolId) return [];
+    const toolId = run.toolId;
     return preview(
       run.componentIds.map((componentId) => ({
-        toolId: run.toolId,
+        toolId,
         componentId,
         strategyId: null,
         targetVersion: null,

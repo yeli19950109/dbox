@@ -100,7 +100,7 @@ fn snapshot_wire_format_and_generated_bindings_are_stable() {
     };
     assert_eq!(
         serde_json::to_string_pretty(&snapshot).unwrap(),
-        include_str!("fixtures/api-snapshot-v1.json").trim()
+        include_str!("fixtures/api-snapshot-v2.json").trim()
     );
 
     let temporary = TempDir::new().unwrap();

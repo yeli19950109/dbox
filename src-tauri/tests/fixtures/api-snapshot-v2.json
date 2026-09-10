@@ -1,0 +1,12 @@
+{
+  "schemaRevision": 2,
+  "tools": [],
+  "installations": [],
+  "providers": [],
+  "catalogDiagnostics": [],
+  "catalogErrors": [],
+  "configRevision": "config-revision",
+  "stateRevision": "state-revision",
+  "environmentRevision": "environment-revision",
+  "refreshedAt": null
+}

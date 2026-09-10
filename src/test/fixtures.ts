@@ -84,7 +84,7 @@ export function snapshotWithTools(count = 3): SnapshotDto {
     tool(index, index % 2 ? "brew" : "npm"),
   );
   return {
-    schemaRevision: 1,
+    schemaRevision: 2,
     tools,
     installations,
     providers: [
@@ -156,6 +156,9 @@ export function failedRun(id = "run-1"): RunDto {
   return {
     id,
     toolId: "npm:tool-0",
+    subject: "tool_update",
+    operation: null,
+    resourceNames: [],
     componentIds: ["core"],
     status: "failed",
     createdAt: "2026-08-27T10:00:00Z",

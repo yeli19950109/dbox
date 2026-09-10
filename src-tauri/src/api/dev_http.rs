@@ -91,6 +91,72 @@ pub fn dev_http_router(service: Arc<ApiService>, event_bus: DevHttpEventBus) -> 
         )
         .route("/__dbox_http/commands/read_manifest", post(read_manifest))
         .route("/__dbox_http/commands/save_manifest", post(save_manifest))
+        .route(
+            "/__dbox_http/commands/list_agent_targets",
+            post(list_agent_targets),
+        )
+        .route(
+            "/__dbox_http/commands/save_agent_targets",
+            post(save_agent_targets),
+        )
+        .route("/__dbox_http/commands/list_skills", post(list_skills))
+        .route(
+            "/__dbox_http/commands/list_skill_sources",
+            post(list_skill_sources),
+        )
+        .route(
+            "/__dbox_http/commands/save_skill_source",
+            post(save_skill_source),
+        )
+        .route(
+            "/__dbox_http/commands/delete_skill_source",
+            post(delete_skill_source),
+        )
+        .route(
+            "/__dbox_http/commands/discover_skills",
+            post(discover_skills),
+        )
+        .route("/__dbox_http/commands/search_skills", post(search_skills))
+        .route(
+            "/__dbox_http/commands/scan_skill_imports",
+            post(scan_skill_imports),
+        )
+        .route(
+            "/__dbox_http/commands/check_skill_updates",
+            post(check_skill_updates),
+        )
+        .route(
+            "/__dbox_http/commands/list_skill_backups",
+            post(list_skill_backups),
+        )
+        .route(
+            "/__dbox_http/commands/preview_skill_operation",
+            post(preview_skill_operation),
+        )
+        .route(
+            "/__dbox_http/commands/list_mcp_servers",
+            post(list_mcp_servers),
+        )
+        .route(
+            "/__dbox_http/commands/scan_mcp_imports",
+            post(scan_mcp_imports),
+        )
+        .route(
+            "/__dbox_http/commands/validate_mcp_server",
+            post(validate_mcp_server),
+        )
+        .route(
+            "/__dbox_http/commands/preview_mcp_operation",
+            post(preview_mcp_operation),
+        )
+        .route(
+            "/__dbox_http/commands/confirm_extension_operation",
+            post(confirm_extension_operation),
+        )
+        .route(
+            "/__dbox_http/commands/extension_operation_result",
+            post(extension_operation_result),
+        )
         .route("/__dbox_http/events", get(event_stream))
         .with_state(DevHttpState {
             service,
@@ -99,7 +165,15 @@ pub fn dev_http_router(service: Arc<ApiService>, event_bus: DevHttpEventBus) -> 
 }
 
 pub async fn serve_dev_http(service: Arc<ApiService>, events: DevHttpEventBus) -> io::Result<()> {
-    let listener = bind_dev_http_listener(DEV_HTTP_PORT)?;
+    serve_dev_http_on_port(service, events, DEV_HTTP_PORT).await
+}
+
+pub async fn serve_dev_http_on_port(
+    service: Arc<ApiService>,
+    events: DevHttpEventBus,
+    port: u16,
+) -> io::Result<()> {
+    let listener = bind_dev_http_listener(port)?;
     let address = listener.local_addr()?;
     let router = dev_http_router(service, events);
     let listener = tokio::net::TcpListener::from_std(listener)?;
@@ -226,9 +300,194 @@ fn sse_event(event: ApiEvent) -> Event {
             .json_data(payload),
         ApiEvent::RunState(payload) => Event::default().event("run-state").json_data(payload),
         ApiEvent::RunOutput(payload) => Event::default().event("run-output").json_data(payload),
+        ApiEvent::SkillsChanged(payload) => {
+            Event::default().event("skills-changed").json_data(payload)
+        }
+        ApiEvent::McpChanged(payload) => Event::default().event("mcp-changed").json_data(payload),
         ApiEvent::ToolState(payload) => Event::default().event("tool-state").json_data(payload),
     }
     .expect("API event DTOs are serializable")
+}
+
+use crate::{agents::AgentTarget, extensions::*};
+async fn list_agent_targets(
+    State(state): State<DevHttpState>,
+) -> Json<CommandResponse<Vec<AgentTarget>>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.targets())
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn save_agent_targets(
+    State(state): State<DevHttpState>,
+    Json(request): Json<SaveAgentsRequest>,
+) -> Json<CommandResponse<Vec<AgentTarget>>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.save_agents(request))
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn list_skills(State(state): State<DevHttpState>) -> Json<CommandResponse<SkillsSnapshot>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.list_skills())
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn list_skill_sources(
+    State(state): State<DevHttpState>,
+) -> Json<CommandResponse<SkillsSnapshot>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.list_skills())
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn save_skill_source(
+    State(state): State<DevHttpState>,
+    Json(request): Json<SaveSourceRequest>,
+) -> Json<CommandResponse<SkillsSnapshot>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.save_source(request))
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn delete_skill_source(
+    State(state): State<DevHttpState>,
+    Json(request): Json<DeleteSourceRequest>,
+) -> Json<CommandResponse<SkillsSnapshot>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.delete_source(request))
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn discover_skills(
+    State(state): State<DevHttpState>,
+    Json(request): Json<DiscoverRequest>,
+) -> Json<CommandResponse<SkillDiscovery>> {
+    Json(state.service.extensions.discover(request).await.into())
+}
+async fn search_skills(
+    State(state): State<DevHttpState>,
+    Json(request): Json<SearchRequest>,
+) -> Json<CommandResponse<Vec<SearchSkill>>> {
+    Json(state.service.extensions.search(request).await.into())
+}
+async fn scan_skill_imports(
+    State(state): State<DevHttpState>,
+) -> Json<CommandResponse<SkillDiscovery>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.scan_skill_imports())
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn check_skill_updates(
+    State(state): State<DevHttpState>,
+    Json(request): Json<CheckUpdatesRequest>,
+) -> Json<CommandResponse<Vec<SkillUpdate>>> {
+    Json(state.service.extensions.check_updates(request).await.into())
+}
+async fn list_skill_backups(
+    State(state): State<DevHttpState>,
+) -> Json<CommandResponse<Vec<ExtensionBackup>>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.list_backups())
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn preview_skill_operation(
+    State(state): State<DevHttpState>,
+    Json(request): Json<SkillOperationRequest>,
+) -> Json<CommandResponse<ExtensionPlan>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.preview_skill(request))
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn list_mcp_servers(State(state): State<DevHttpState>) -> Json<CommandResponse<McpSnapshot>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.list_mcp())
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn scan_mcp_imports(State(state): State<DevHttpState>) -> Json<CommandResponse<McpScan>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.scan_mcp_imports())
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn validate_mcp_server(
+    State(state): State<DevHttpState>,
+    Json(request): Json<McpEdit>,
+) -> Json<CommandResponse<Vec<Diagnostic>>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.validate_mcp(request))
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn preview_mcp_operation(
+    State(state): State<DevHttpState>,
+    Json(request): Json<McpOperationRequest>,
+) -> Json<CommandResponse<ExtensionPlan>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.preview_mcp(request))
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+async fn confirm_extension_operation(
+    State(state): State<DevHttpState>,
+    Json(request): Json<ConfirmExtensionRequest>,
+) -> Json<CommandResponse<ExtensionStarted>> {
+    Json(state.service.extensions.confirm(request).into())
+}
+async fn extension_operation_result(
+    State(state): State<DevHttpState>,
+    Json(request): Json<IdRequest>,
+) -> Json<CommandResponse<ExtensionResult>> {
+    let service = std::sync::Arc::clone(&state.service.extensions);
+    Json(
+        tokio::task::spawn_blocking(move || service.result(&request.id))
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
 }
 
 #[cfg(test)]
@@ -430,6 +689,90 @@ mod tests {
                 "route {name}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn extension_http_contract_and_native_history_match_shared_service() {
+        let fixture = Fixture::new();
+        for (command, expected) in [
+            (
+                "list_skills",
+                serde_json::to_value(fixture.service.extensions.list_skills().unwrap()).unwrap(),
+            ),
+            (
+                "list_agent_targets",
+                serde_json::to_value(fixture.service.extensions.targets().unwrap()).unwrap(),
+            ),
+            (
+                "list_mcp_servers",
+                serde_json::to_value(fixture.service.extensions.list_mcp().unwrap()).unwrap(),
+            ),
+            (
+                "scan_mcp_imports",
+                serde_json::to_value(fixture.service.extensions.scan_mcp_imports().unwrap())
+                    .unwrap(),
+            ),
+        ] {
+            let value = response_json(
+                post(
+                    &fixture.router,
+                    &format!("/__dbox_http/commands/{command}"),
+                    json!({}),
+                )
+                .await,
+            )
+            .await;
+            assert_eq!(value, json!({"status":"ok", "data":expected}));
+        }
+        let request = json!({ "action":"import", "serverIds":[], "candidateIds":[], "targetIds":[], "enabled":true, "edit":null, "importJson":"{\"demo\":{\"command\":\"node\"}}", "backupId":null });
+        let preview = response_json(
+            post(
+                &fixture.router,
+                "/__dbox_http/commands/preview_mcp_operation",
+                request,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(preview["status"], "ok");
+        let confirmation =
+            json!({"planId":preview["data"]["planId"], "planHash":preview["data"]["planHash"]});
+        let started = response_json(
+            post(
+                &fixture.router,
+                "/__dbox_http/commands/confirm_extension_operation",
+                confirmation,
+            )
+            .await,
+        )
+        .await;
+        let id = started["data"]["runId"].as_str().unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let result = fixture.service.extensions.result(id).unwrap();
+                if result.status != "running" {
+                    break result;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(result.status, "succeeded");
+        let history = fixture.service.run_history().unwrap();
+        assert_eq!(history.runs[0].subject, crate::domain::RunSubject::Mcp);
+        assert_eq!(history.runs[0].tool_id, None);
+        assert_eq!(history.runs[0].resource_names, vec!["demo"]);
+        let wire = response_json(
+            post(
+                &fixture.router,
+                "/__dbox_http/commands/extension_operation_result",
+                json!({"id":id}),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(wire["data"], serde_json::to_value(result).unwrap());
     }
 
     #[tokio::test]

@@ -17,17 +17,55 @@ export const commands = {
 	validateManifest: (request: ManifestInputDto) => typedError<ManifestValidationDto, ApiErrorDto>(__TAURI_INVOKE("validate_manifest", { request })),
 	readManifest: (request: ManifestReadRequestDto) => typedError<ManifestDocumentDto, ApiErrorDto>(__TAURI_INVOKE("read_manifest", { request })),
 	saveManifest: (request: SaveManifestRequestDto) => typedError<SavedManifestDto, ApiErrorDto>(__TAURI_INVOKE("save_manifest", { request })),
+	listAgentTargets: () => typedError<AgentTarget[], ApiErrorDto>(__TAURI_INVOKE("list_agent_targets")),
+	saveAgentTargets: (request: SaveAgentsRequest) => typedError<AgentTarget[], ApiErrorDto>(__TAURI_INVOKE("save_agent_targets", { request })),
+	listSkills: () => typedError<SkillsSnapshot, ApiErrorDto>(__TAURI_INVOKE("list_skills")),
+	listSkillSources: () => typedError<SkillsSnapshot, ApiErrorDto>(__TAURI_INVOKE("list_skill_sources")),
+	saveSkillSource: (request: SaveSourceRequest) => typedError<SkillsSnapshot, ApiErrorDto>(__TAURI_INVOKE("save_skill_source", { request })),
+	deleteSkillSource: (request: DeleteSourceRequest) => typedError<SkillsSnapshot, ApiErrorDto>(__TAURI_INVOKE("delete_skill_source", { request })),
+	discoverSkills: (request: DiscoverRequest) => typedError<SkillDiscovery, ApiErrorDto>(__TAURI_INVOKE("discover_skills", { request })),
+	searchSkills: (request: SearchRequest) => typedError<SearchSkill[], ApiErrorDto>(__TAURI_INVOKE("search_skills", { request })),
+	scanSkillImports: () => typedError<SkillDiscovery, ApiErrorDto>(__TAURI_INVOKE("scan_skill_imports")),
+	checkSkillUpdates: (request: CheckUpdatesRequest) => typedError<SkillUpdate[], ApiErrorDto>(__TAURI_INVOKE("check_skill_updates", { request })),
+	listSkillBackups: () => typedError<ExtensionBackup[], ApiErrorDto>(__TAURI_INVOKE("list_skill_backups")),
+	previewSkillOperation: (request: SkillOperationRequest) => typedError<ExtensionPlan, ApiErrorDto>(__TAURI_INVOKE("preview_skill_operation", { request })),
+	listMcpServers: () => typedError<McpSnapshot, ApiErrorDto>(__TAURI_INVOKE("list_mcp_servers")),
+	scanMcpImports: () => typedError<McpScan, ApiErrorDto>(__TAURI_INVOKE("scan_mcp_imports")),
+	validateMcpServer: (request: McpEdit) => typedError<Diagnostic[], ApiErrorDto>(__TAURI_INVOKE("validate_mcp_server", { request })),
+	previewMcpOperation: (request: McpOperationRequest) => typedError<ExtensionPlan, ApiErrorDto>(__TAURI_INVOKE("preview_mcp_operation", { request })),
+	confirmExtensionOperation: (request: ConfirmExtensionRequest) => typedError<ExtensionStarted, ApiErrorDto>(__TAURI_INVOKE("confirm_extension_operation", { request })),
+	extensionOperationResult: (request: IdRequest) => typedError<ExtensionResult, ApiErrorDto>(__TAURI_INVOKE("extension_operation_result", { request })),
 };
 
 /** Events */
 export const events = {
+	mcpChanged: makeEvent<McpChangedEventDto>("mcp-changed"),
 	refreshProgress: makeEvent<RefreshProgressEventDto>("refresh-progress"),
 	runOutput: makeEvent<RunOutputEventDto>("run-output"),
 	runState: makeEvent<RunStateEventDto>("run-state"),
+	skillsChanged: makeEvent<ExtensionChangedEventDto>("skills-changed"),
 	toolState: makeEvent<ToolStateEventDto>("tool-state"),
 };
 
 /* Types */
+export type AgentOverride = {
+	skillsDir: string | null,
+	mcpFile: string | null,
+};
+
+export type AgentTarget = {
+	id: string,
+	name: string,
+	scope: string,
+	skillsDir: string,
+	mcpFile: string,
+	pathSource: string,
+	available: boolean,
+	transports: McpTransport[],
+	sharedWith: string[],
+	scanDirs: string[],
+};
+
 export type ApiErrorCode = "invalid_request" | "not_found" | "invalid_plan" | "conflict" | "unavailable" | "internal";
 
 export type ApiErrorDto = {
@@ -66,6 +104,11 @@ export type CatalogErrorDto = {
 	column: number | null,
 };
 
+export type CheckUpdatesRequest = {
+	requestId: string,
+	skillIds: string[],
+};
+
 export type CommandSpecDto = {
 	program: string,
 	args: string[],
@@ -95,6 +138,11 @@ export type ComponentStatusDto = {
 	verification: VerificationStatusDto | null,
 };
 
+export type ConfirmExtensionRequest = {
+	planId: string,
+	planHash: string,
+};
+
 export type ConfirmRequestDto = {
 	planId: string,
 	planHash: string,
@@ -103,6 +151,23 @@ export type ConfirmRequestDto = {
 export type ConfirmResponseDto = {
 	execution: ExecutionResultDto,
 	snapshot: SnapshotDto,
+};
+
+export type DeleteSourceRequest = {
+	expectedRevision: string,
+	sourceId: string,
+};
+
+export type DeployMode = "auto" | "copy" | "symlink" | "external";
+
+export type Diagnostic = {
+	targetId: string,
+	message: string,
+};
+
+export type DiscoverRequest = {
+	requestId: string,
+	source: SkillSource,
 };
 
 export type EnvironmentValueDto = {
@@ -123,6 +188,49 @@ export type ExecutionResultDto = {
 	finishedAt: string,
 	outputTail: string,
 	verification: VerificationStatusDto | null,
+};
+
+export type ExtensionBackup = {
+	id: string,
+	resource: ResourceKind,
+	operation: string,
+	names: string[],
+	createdAt: string,
+	status: string,
+	sizeBytes: string,
+};
+
+export type ExtensionChangedEventDto = {
+	revision: string,
+	sequence: string,
+	runId: string,
+	resourceIds: string[],
+};
+
+export type ExtensionPlan = {
+	planId: string,
+	planHash: string,
+	resource: ResourceKind,
+	operation: string,
+	names: string[],
+	expiresAt: string,
+	steps: OperationStepView[],
+	warnings: string[],
+};
+
+export type ExtensionResult = {
+	runId: string,
+	status: string,
+	targets: TargetResult[],
+	backupId: string | null,
+};
+
+export type ExtensionStarted = {
+	runId: string,
+};
+
+export type IdRequest = {
+	id: string,
 };
 
 export type InstallationDto = {
@@ -161,6 +269,84 @@ export type ManifestValidationDto = {
 	fileName: string,
 	manifestId: string,
 	normalizedToml: string,
+};
+
+export type McpAction = "import" | "upsert" | "toggle" | "delete" | "sync" | "restore" | "delete_backup";
+
+export type McpBindingView = {
+	targetId: string,
+	key: string,
+	desiredEnabled: boolean,
+	observedState: string,
+	extraJson: string,
+};
+
+export type McpCandidate = {
+	id: string,
+	targetId: string,
+	key: string,
+	transport: McpTransport,
+	configJson: string,
+	enabled: boolean,
+};
+
+export type McpChangedEventDto = {
+	revision: string,
+	sequence: string,
+	runId: string,
+	resourceIds: string[],
+};
+
+export type McpEdit = {
+	id: string | null,
+	name: string,
+	description: string,
+	transport: McpTransport,
+	configJson: string,
+	secrets: { [key in string]: SecretEdit },
+	bindings: McpBindingView[],
+};
+
+export type McpOperationRequest = {
+	action: McpAction,
+	serverIds: string[],
+	candidateIds: string[],
+	targetIds: string[],
+	enabled: boolean,
+	edit: McpEdit | null,
+	importJson: string | null,
+	backupId: string | null,
+};
+
+export type McpScan = {
+	candidates: McpCandidate[],
+	errors: Diagnostic[],
+};
+
+export type McpServerView = {
+	id: string,
+	name: string,
+	description: string,
+	transport: McpTransport,
+	configJson: string,
+	bindings: McpBindingView[],
+	pendingDelete: boolean,
+};
+
+export type McpSnapshot = {
+	revision: string,
+	servers: McpServerView[],
+};
+
+export type McpTransport = "stdio" | "http" | "sse";
+
+export type OperationStepView = {
+	targetId: string,
+	path: string,
+	action: string,
+	before: string,
+	after: string,
+	conflict: string | null,
 };
 
 export type PreviewRequestDto = {
@@ -207,9 +393,14 @@ export type RefreshRequestDto = {
 
 export type RefreshScopeDto = { scope: "all" } | { scope: "provider"; providerId: string } | { scope: "tool"; toolId: string };
 
+export type ResourceKind = "skill" | "mcp";
+
 export type RunDto = {
 	id: string,
-	toolId: string,
+	toolId: string | null,
+	subject: RunSubject,
+	operation: string | null,
+	resourceNames: string[],
 	componentIds: string[],
 	status: string,
 	createdAt: string,
@@ -266,11 +457,18 @@ export type RunStateEventDto = {
 
 export type RunStateKindDto = { kind: "state_changed"; status: string } | { kind: "exit"; code: number | null };
 
+export type RunSubject = "tool_update" | "skill" | "mcp";
+
 export type RunSummaryDto = {
 	exitCode: number | null,
 	outputTail: string,
 	verification: VerificationStatusDto | null,
 	error: string | null,
+};
+
+export type SaveAgentsRequest = {
+	expectedRevision: string,
+	overrides: { [key in string]: AgentOverride },
 };
 
 export type SaveManifestRequestDto = {
@@ -284,11 +482,29 @@ export type SaveSettingsRequestDto = {
 	settings: SettingsValueDto,
 };
 
+export type SaveSourceRequest = {
+	expectedRevision: string,
+	source: SkillSource,
+};
+
 export type SavedManifestDto = {
 	revision: string,
 	validation: ManifestValidationDto,
 	snapshot: SnapshotDto,
 };
+
+export type SearchRequest = {
+	requestId: string,
+	query: string,
+};
+
+export type SearchSkill = {
+	name: string,
+	repository: string,
+	skillId: string,
+};
+
+export type SecretEdit = { action: "keep" } | { action: "set"; value: string } | { action: "remove" };
 
 export type SettingsDocumentDto = {
 	revision: string,
@@ -301,6 +517,86 @@ export type SettingsValueDto = {
 	logRetention: LogRetentionDto,
 	executableOverrides: { [key in string]: string },
 	componentStrategies: { [key in string]: { [key in string]: string } },
+};
+
+export type SkillAction = "install" | "import" | "adopt" | "toggle" | "update" | "uninstall" | "restore" | "delete_backup";
+
+export type SkillCandidate = {
+	id: string,
+	name: string,
+	description: string,
+	directoryName: string,
+	path: string,
+	canonicalPath: string,
+	linkTarget: string | null,
+	contentHash: string,
+	content: string,
+	targetIds: string[],
+	origin: SkillOrigin | null,
+};
+
+export type SkillDeployment = {
+	targetId: string,
+	path: string,
+	desiredEnabled: boolean,
+	mode: DeployMode,
+	lastAppliedHash: string | null,
+	observedState: string,
+};
+
+export type SkillDiscovery = {
+	candidates: SkillCandidate[],
+	errors: Diagnostic[],
+	checkedAt: string,
+};
+
+export type SkillOperationRequest = {
+	action: SkillAction,
+	skillIds: string[],
+	candidateIds: string[],
+	targetIds: string[],
+	enabled: boolean,
+	mode: DeployMode,
+	backupId: string | null,
+};
+
+export type SkillOrigin = {
+	source: SkillSource,
+	relativePath: string,
+	resolvedRevision: string | null,
+};
+
+export type SkillRecord = {
+	id: string,
+	name: string,
+	description: string,
+	directoryName: string,
+	origin: SkillOrigin | null,
+	contentHash: string,
+	updatedAt: string,
+	deployments: SkillDeployment[],
+	pendingDelete: boolean,
+};
+
+export type SkillSource = {
+	id: string,
+	kind: SourceKind,
+	uri: string,
+	requestedRef: string | null,
+	enabled: boolean,
+};
+
+export type SkillUpdate = {
+	skillId: string,
+	status: string,
+	message: string,
+	candidateId: string | null,
+};
+
+export type SkillsSnapshot = {
+	revision: string,
+	sources: SkillSource[],
+	skills: SkillRecord[],
 };
 
 export type SnapshotDto = {
@@ -316,6 +612,8 @@ export type SnapshotDto = {
 	refreshedAt: string | null,
 };
 
+export type SourceKind = "local" | "zip" | "github";
+
 export type StatusReasonDto = {
 	code: string,
 	summary: string,
@@ -330,6 +628,13 @@ export type StrategyDto = {
 };
 
 export type StrategyKindDto = { kind: "provider_default" } | { kind: "command"; program: string; args: string[] } | { kind: "package_manager"; manager: string; args: string[] };
+
+export type TargetResult = {
+	targetId: string,
+	path: string,
+	status: string,
+	message: string,
+};
 
 export type ToolDto = {
 	id: string,

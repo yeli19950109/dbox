@@ -6,7 +6,7 @@
   "scripts": {
     "icons:macos": "node scripts/generate-macos-icon.mjs",
     "bindings:generate": "cargo run --manifest-path src-tauri/Cargo.toml --features bindings --bin export-bindings -- src/bindings.ts",
-    "bindings:check": "npm run bindings:generate && git diff --exit-code -- src/bindings.ts",
+    "bindings:check": "node scripts/check-bindings.mjs",
     "dev": "vite",
     "dev:http": "node scripts/dev-http.mjs",
     "build": "vue-tsc --noEmit && vite build",

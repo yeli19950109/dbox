@@ -14,7 +14,7 @@ use crate::persistence::{LogRetentionPolicy, RunLogEntry, RunLogStream, Settings
 use crate::providers::{ProviderError, ProviderOperation, ProviderStatus, Recoverability};
 use crate::version::{ComponentStatus, StatusReason, ToolStatus, VerificationStatus};
 
-pub const API_SCHEMA_REVISION: u32 = 1;
+pub const API_SCHEMA_REVISION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -765,7 +765,10 @@ pub struct RunHistoryDto {
 #[serde(rename_all = "camelCase")]
 pub struct RunDto {
     pub id: String,
-    pub tool_id: String,
+    pub tool_id: Option<String>,
+    pub subject: crate::domain::RunSubject,
+    pub operation: Option<String>,
+    pub resource_names: Vec<String>,
     pub component_ids: Vec<String>,
     pub status: String,
     pub created_at: String,
@@ -781,7 +784,10 @@ impl From<&Run> for RunDto {
     fn from(run: &Run) -> Self {
         Self {
             id: run.id.to_string(),
-            tool_id: run.tool_id.to_string(),
+            tool_id: run.tool_id.as_ref().map(ToString::to_string),
+            subject: run.subject,
+            operation: run.operation.clone(),
+            resource_names: run.resource_names.clone(),
             component_ids: run.component_ids.iter().map(ToString::to_string).collect(),
             status: run_status_name(run.status).into(),
             created_at: run.created_at.to_rfc3339(),

@@ -8,6 +8,8 @@
 >
 > 范围：`docs/development-plan.md`、T01–T26、当前 Rust/前端依赖与已实现代码
 
+2026-09-10 补充：T21 的 CLI 唯一后端约束已由用户要求下的 [Skill/MCP 能力对照与接入计划](skills-mcp-integration-plan.md) 替代。原生管理的基础库选型仍须在该计划 P0 重新审计；本文其余已有基础设施结论保持适用，不表示新依赖已经通过审计。
+
 ## 1. 目的
 
 本文件集中记录“哪些基础设施应优先复用开源库，哪些逻辑仍应由 dbox 自己实现”。它不替代任务文件，也不表示候选依赖已经获准加入项目。
@@ -42,7 +44,10 @@
 | T10/T11 Provider 并发 | Tokio `Semaphore`、`JoinSet`，通过 npm/brew CLI 获取数据 | 已满足；CLI JSON 到领域 DTO 的映射必须保留 |
 | T13 刷新服务 | Tokio `Mutex`/`RwLock` 与简单 TTL 快照 | 当前规模可接受，见 4.2 的升级条件 |
 | T14 队列 | Tokio `Mutex`/`Notify`、`CancellationToken`，复用 T08 executor | 当前串行、可持久化业务队列不需要引入通用任务平台 |
-| T21 Skill | 只调用 `npx skills` | 已满足；禁止读取或修改 Skill 内部目录/lock 文件 |
+
+T21 原有“仅调用 `npx skills`”结论已失效，移出已满足清单。新方案参考 cc-switch 管理内容与部署，继续优先复用下载、解压、解析和原子写入库；外部管理器的 lock 只用于兼容导入读取。
+
+Skill/MCP 存储直接采用 skills.json、mcp.json，复用现有 serde_json 与 atomic-write-file；按个人本地少量资源设计，不引入 SQLite 等数据库、ORM、索引或通用存储框架。备份使用普通目录和 JSON 清单，不建设独立的事务日志或长期版本仓库。
 
 主要参考：[`semver`](https://docs.rs/semver/latest/semver/)、[`process-wrap`](https://docs.rs/process-wrap/latest/process_wrap/)、[`tokio-util::CancellationToken`](https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html)、[`which`](https://docs.rs/which/latest/which/)。
 
@@ -175,7 +180,7 @@ T14 需要 queued item 可定位取消、批次聚合、同 Tool 互斥、重试
 - Provider capability 与特殊退出码/部分失败语义；
 - Pi core/extensions 等 catalog 增强；
 - UpdatePlan 选择、post-check 和状态汇总；
-- `npx skills` 不稳定/非 JSON 输出到 partial/unknown 的映射。
+- Skill 的来源/身份、部署所有权、启停与恢复，以及 MCP 格式适配、冲突检测和逐目标 partial/unknown 状态（已按接入计划实施）。
 
 这些是产品业务规则，不属于重复实现通用基础设施。
 
@@ -200,3 +205,10 @@ T14 需要 queued item 可定位取消、批次聚合、同 Tool 互斥、重试
 - 发布没有自研 bundler/updater；
 - 新依赖均固定版本/feature，并经过许可证、MSRV、漏洞和平台检查；
 - dbox 自定义代码集中在 Provider 映射、领域状态、策略、队列业务规则与 UI 产品行为。
+
+
+## 7. Skill/MCP 实施补充（2026-09-10）
+
+原生扩展管理已实现。下载、YAML、TOML、ZIP 与目录遍历分别使用 reqwest、serde_yaml_ng、toml_edit、zip、walkdir；确切锁定版本、feature、许可证、MSRV 和平台说明见 [ADR 0004](adr/0004-native-extensions.md)。JSON/原子写入复用 serde_json/atomic-write-file，不引入 SQLite/ORM/索引。
+
+为 rustls 的 ISC 依赖及根证书数据的 CDLA-Permissive-2.0 补齐许可清单和随包文本；没有增加安全公告忽略项。原 chacha20 0.10.1 被撤回，已更新至 0.10.2。cargo-deny 的安全公告、来源、许可、依赖策略均通过。

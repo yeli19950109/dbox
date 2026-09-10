@@ -27,6 +27,9 @@ allow = [
   "BSD-2-Clause",
   "BSD-3-Clause",
   "CC0-1.0",
+  # Rustls root data and ring/webpki; see ADR 0004 and bundled license texts.
+  "CDLA-Permissive-2.0",
+  "ISC",
   "MIT",
   "MIT-0",
   "MPL-2.0",

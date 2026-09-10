@@ -3,6 +3,7 @@ import ToolsView from "../views/ToolsView.vue";
 import RunsView from "../views/RunsView.vue";
 import ConfirmView from "../views/ConfirmView.vue";
 import SettingsView from "../views/SettingsView.vue";
+import McpView from "../views/McpView.vue";
 import SkillsView from "../views/SkillsView.vue";
 
 export const router = createRouter({
@@ -13,6 +14,7 @@ export const router = createRouter({
     { path: "/runs", name: "runs", component: RunsView },
     { path: "/runs/confirm", name: "confirm", component: ConfirmView },
     { path: "/settings", name: "settings", component: SettingsView },
+    { path: "/mcp", name: "mcp", component: McpView },
     { path: "/skills", name: "skills", component: SkillsView },
     { path: "/:pathMatch(.*)*", redirect: "/tools" },
   ],

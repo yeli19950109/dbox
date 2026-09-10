@@ -9,7 +9,7 @@ default-run = "dbox"
 [features]
 default = []
 bindings = []
-dev-http = ["dep:axum", "dep:dirs", "dep:tokio-stream", "tokio/net"]
+dev-http = ["dep:axum", "dep:tokio-stream", "tokio/net"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -38,7 +38,12 @@ blake3 = "1.8"
 bstr = "1"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
-dirs = { version = "6", optional = true }
+dirs = "6"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+serde_yaml_ng = "0.10"
+toml_edit = { version = "0.22", features = ["serde"] }
+walkdir = "2"
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
 fix-path-env = { version = "0.0.0", git = "https://github.com/tauri-apps/fix-path-env-rs", rev = "c4c45d503ea115a839aae718d02f79e7c7f0f673" }
 process-wrap = { version = "10.0.0", features = ["tokio1"] }
 regex = "1"

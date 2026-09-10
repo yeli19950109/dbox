@@ -25,7 +25,8 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "resources/catalog/*.toml"
+      "resources/catalog/*.toml",
+      "resources/licenses/*.txt"
     ],
     "icon": [
       "icons/32x32.png",
