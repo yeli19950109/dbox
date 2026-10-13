@@ -24,7 +24,7 @@
       <span class="spinner" aria-hidden="true" />
       <span>{{
         runs.startingUpdate && !runs.executing
-          ? "正在准备更新计划…"
+          ? "正在检查更新并准备计划…"
           : selectedRun
           ? "正在执行更新，输出会实时显示在下方。"
           : "正在启动更新，等待执行记录…"
@@ -192,7 +192,7 @@
         </template>
         <AppLoading
           v-else-if="runs.startingUpdate || runs.executing"
-          :label="runs.startingUpdate && !runs.executing ? '正在准备更新计划…' : '等待命令启动与实时输出…'"
+          :label="runs.startingUpdate && !runs.executing ? '正在检查更新并准备计划…' : '等待命令启动与实时输出…'"
         />
         <AppEmptyState
           v-else

@@ -562,14 +562,14 @@ async fn successful_command_with_failed_post_check_is_partial_and_not_verified()
         "tool",
         "1.0.0",
     );
-    let provider = PostCheckFailureProvider {
+    let provider = Arc::new(PostCheckFailureProvider {
         id: ProviderId::new("post-check").unwrap(),
         installation: item,
         program: fixture.program.clone(),
         scans: AtomicUsize::new(0),
-    };
+    });
     let mut registry = ProviderRegistry::new();
-    registry.register(Arc::new(provider)).unwrap();
+    registry.register(provider.clone()).unwrap();
     let service = fixture.service(
         registry,
         Catalog::default(),
@@ -610,6 +610,27 @@ async fn successful_command_with_failed_post_check_is_partial_and_not_verified()
     let cached = fixture.store.load_state().unwrap();
     assert_eq!(cached.value.runs.last().unwrap().status, RunStatus::Partial);
     assert!(fixture.temporary.path().join("logs/runs").exists());
+    let retry = service
+        .preview_updates(&[UpdateSelection {
+            tool_id: snapshot.tools[0].id.clone(),
+            component_id: ComponentId::new("core").unwrap(),
+            strategy_id: None,
+            target_version: None,
+        }])
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        retry,
+        ApplicationError::Provider(ProviderError {
+            operation: ProviderOperation::Scan,
+            ..
+        })
+    ));
+    assert_eq!(
+        provider.scans.load(Ordering::SeqCst),
+        3,
+        "a failed post-check must invalidate readiness before the next preview"
+    );
 }
 
 #[tokio::test]
@@ -667,4 +688,149 @@ async fn restart_retains_installation_sources_and_lists_unscanned_providers() {
         1,
         "refreshing an empty provider preserves cached tools from other sources"
     );
+}
+
+#[tokio::test]
+async fn restart_preview_refreshes_only_selected_sources_and_preserves_other_cached_tools() {
+    let fixture = Fixture::new();
+    let selected = installation(
+        "selected",
+        PackageKind::Other("fixture".into()),
+        "first",
+        "1.0.0",
+    );
+    let unrelated = installation(
+        "unrelated",
+        PackageKind::Other("fixture".into()),
+        "second",
+        "1.0.0",
+    );
+    let provider = |item: &Installation| {
+        FakeProvider::new(item.provider_id.clone())
+            .with_scan_result(Ok(vec![item.clone()]))
+            .with_check_result(Ok(vec![checked(item, "2.0.0")]))
+            .with_plan_result(Ok(ProviderUpdatePlan {
+                provider_id: item.provider_id.clone(),
+                installation_id: item.id.clone(),
+                component_id: ComponentId::new("core").unwrap(),
+                strategy_id: StrategyId::new("provider-default").unwrap(),
+                program: fixture.program.display().to_string(),
+                args: vec!["streams".into()],
+            }))
+    };
+    let registry = |first: FakeProvider, second: FakeProvider| {
+        let mut registry = ProviderRegistry::new();
+        registry.register(Arc::new(first)).unwrap();
+        registry.register(Arc::new(second)).unwrap();
+        registry
+    };
+    let initial = fixture.service(
+        registry(provider(&selected), provider(&unrelated)),
+        Catalog::default(),
+        Arc::new(FakeEnvironment::default()),
+    );
+    let snapshot = initial.refresh_tools(RefreshRequest::all()).await.unwrap();
+    let selection = UpdateSelection {
+        tool_id: snapshot
+            .tools
+            .iter()
+            .find(|tool| tool.installation_ids.contains(&selected.id))
+            .unwrap()
+            .id
+            .clone(),
+        component_id: ComponentId::new("core").unwrap(),
+        strategy_id: None,
+        target_version: None,
+    };
+    drop(initial);
+    let selected_provider = provider(&selected);
+    let unrelated_provider = provider(&unrelated).with_probe_result(Err(ProviderError::new(
+        unrelated.provider_id.clone(),
+        ProviderOperation::Probe,
+        Recoverability::Retryable,
+        "unrelated source is offline",
+    )));
+    let restarted = fixture.service(
+        registry(selected_provider.clone(), unrelated_provider.clone()),
+        Catalog::default(),
+        Arc::new(FakeEnvironment::default()),
+    );
+    let plans = restarted
+        .preview_updates(std::slice::from_ref(&selection))
+        .await
+        .unwrap();
+    assert_eq!(plans.len(), 1);
+    assert_eq!(selected_provider.calls().probe, 1);
+    assert_eq!(selected_provider.calls().scan, 1);
+    assert_eq!(selected_provider.calls().check_updates, 1);
+    assert_eq!(unrelated_provider.calls().probe, 0);
+    assert_eq!(unrelated_provider.calls().scan, 0);
+    assert_eq!(unrelated_provider.calls().plan_update, 0);
+    assert_eq!(restarted.snapshot().await.tools.len(), 2);
+    restarted.preview_updates(&[selection]).await.unwrap();
+    assert_eq!(selected_provider.calls().probe, 1);
+    assert_eq!(selected_provider.calls().scan, 1);
+    assert_eq!(selected_provider.calls().check_updates, 1);
+    assert_eq!(selected_provider.calls().plan_update, 2);
+    assert_eq!(unrelated_provider.calls().probe, 0);
+}
+
+#[tokio::test]
+async fn restart_command_preview_does_not_require_the_installation_provider_to_be_online() {
+    let fixture = Fixture::new();
+    let pi = installation(
+        "npm-global",
+        PackageKind::NpmGlobal,
+        "@earendil-works/pi-coding-agent",
+        "1.0.0",
+    );
+    let provider = FakeProvider::new(pi.provider_id.clone())
+        .with_scan_result(Ok(vec![pi.clone()]))
+        .with_check_result(Ok(vec![checked(&pi, "2.0.0")]));
+    let registry = |provider: FakeProvider| {
+        let mut registry = ProviderRegistry::new();
+        registry.register(Arc::new(provider)).unwrap();
+        registry
+    };
+    let environment = Arc::new(FakeEnvironment::with_programs(BTreeMap::from([(
+        "pi".into(),
+        fixture.program.clone(),
+    )])));
+    let initial = fixture.service(
+        registry(provider),
+        Catalog::build(built_in_manifests()).unwrap(),
+        environment.clone(),
+    );
+    let snapshot = initial.refresh_tools(RefreshRequest::all()).await.unwrap();
+    let selection = UpdateSelection {
+        tool_id: snapshot.tools[0].id.clone(),
+        component_id: ComponentId::new("core").unwrap(),
+        strategy_id: Some(StrategyId::new("self").unwrap()),
+        target_version: None,
+    };
+    drop(initial);
+
+    let offline =
+        FakeProvider::new(pi.provider_id.clone()).with_probe_result(Err(ProviderError::new(
+            pi.provider_id.clone(),
+            ProviderOperation::Probe,
+            Recoverability::Retryable,
+            "npm is unavailable, but pi can still update itself",
+        )));
+    let restarted = fixture.service(
+        registry(offline.clone()),
+        Catalog::build(built_in_manifests()).unwrap(),
+        environment,
+    );
+    let plans = restarted.preview_updates(&[selection]).await.unwrap();
+    assert_eq!(plans.len(), 1);
+    assert_eq!(
+        plans[0].command.program,
+        fixture.program.display().to_string()
+    );
+    assert_eq!(plans[0].command.args, ["update", "--self"]);
+    assert_eq!(offline.calls().probe, 0);
+    assert_eq!(offline.calls().scan, 0);
+    assert_eq!(offline.calls().check_updates, 0);
+    assert_eq!(offline.calls().plan_update, 0);
 }

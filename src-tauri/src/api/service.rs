@@ -250,9 +250,16 @@ impl ApiService {
             .into_iter()
             .map(update_selection)
             .collect::<Result<Vec<_>, _>>()?;
-        self.application
-            .preview_updates(&selections)
-            .await
+        let previous_revision = self.application.snapshot().await.state_revision;
+        let result = self.application.preview_updates(&selections).await;
+        // Preparing an update may refresh persisted inventory after a restart.
+        // Publish that state even if another selected provider could not prepare.
+        let snapshot = self.application.snapshot().await;
+        if snapshot.state_revision != previous_revision {
+            let dto = self.snapshot_from(snapshot).await?;
+            self.emit_tool_state(&dto);
+        }
+        result
             .map(|plans| plans.iter().map(UpdatePlanDto::from).collect())
             .map_err(application_error)
     }

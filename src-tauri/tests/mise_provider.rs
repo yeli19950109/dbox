@@ -6,11 +6,22 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use dbox_lib::api::{ApiService, MemoryApiEventEmitter, RefreshRequestDto, RefreshScopeDto};
+use dbox_lib::api::{
+    ApiEvent, ApiService, MemoryApiEventEmitter, PreviewRequestDto, RefreshRequestDto,
+    RefreshScopeDto, UpdateSelectionDto,
+};
+use dbox_lib::application::{
+    ApplicationError, ApplicationService, ApplicationServiceOptions, RefreshRequest,
+    ResolverApplicationEnvironment, UpdateSelection,
+};
+use dbox_lib::catalog::Catalog;
 use dbox_lib::domain::{ComponentId, Installation, InstallationScope, StrategyId, Tool};
-use dbox_lib::executor::CommandSpec;
+use dbox_lib::environment::{EnvironmentResolver, WhichLocator};
+use dbox_lib::executor::{CommandExecutor, CommandSpec, NoopEventSink};
 use dbox_lib::persistence::{AppPaths, PersistenceStore};
-use dbox_lib::providers::{MiseProvider, MiseProviderOptions, ProviderUpdateRequest, ToolProvider};
+use dbox_lib::providers::{
+    MiseProvider, MiseProviderOptions, ProviderRegistry, ProviderUpdateRequest, ToolProvider,
+};
 use dbox_lib::version::{ComponentStatus, VersionValue};
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -93,6 +104,55 @@ impl FakeMise {
             .map(str::to_owned)
             .collect()
     }
+
+    fn store(&self) -> Arc<PersistenceStore> {
+        Arc::new(PersistenceStore::new(AppPaths::new(
+            self.temporary.path().join("config"),
+            self.temporary.path().join("data"),
+            self.temporary.path().join("logs"),
+        )))
+    }
+
+    fn service(&self) -> ApplicationService {
+        let store = self.store();
+        let mut registry = ProviderRegistry::new();
+        // A new provider instance is essential: a restarted process has no in-memory
+        // scan state even though its persisted tools still show available updates.
+        registry.register(Arc::new(self.provider())).unwrap();
+        ApplicationService::new(
+            Arc::new(registry),
+            Catalog::default(),
+            Arc::clone(&store),
+            CommandExecutor::new(Some(store), Arc::new(NoopEventSink), 4096),
+            Arc::new(ResolverApplicationEnvironment::new(
+                EnvironmentResolver::new(
+                    Arc::new(WhichLocator),
+                    self.temporary.path().as_os_str().to_owned(),
+                    self.home.clone(),
+                ),
+            )),
+            ApplicationServiceOptions::default(),
+        )
+        .unwrap()
+    }
+
+    async fn persist_available_update(&self) -> UpdateSelection {
+        let snapshot = self
+            .service()
+            .refresh_tools(RefreshRequest::all())
+            .await
+            .unwrap();
+        assert_eq!(
+            snapshot.tools[0].components[0].status,
+            ComponentStatus::UpdateAvailable
+        );
+        UpdateSelection {
+            tool_id: snapshot.tools[0].id.clone(),
+            component_id: ComponentId::new("core").unwrap(),
+            strategy_id: None,
+            target_version: None,
+        }
+    }
 }
 
 fn request(installation: &Installation) -> ProviderUpdateRequest {
@@ -102,6 +162,177 @@ fn request(installation: &Installation) -> ProviderUpdateRequest {
         strategy_id: StrategyId::new("provider-default").unwrap(),
         target_version: None,
     }
+}
+
+#[tokio::test]
+async fn restart_preview_rehydrates_mise_before_planning_and_keeps_warm_previews_fast() {
+    let fake = FakeMise::new();
+    fake.active_node();
+    let selection = fake.persist_available_update().await;
+    let restarted = Arc::new(fake.service());
+    assert_eq!(
+        restarted.snapshot().await.tools[0].components[0].status,
+        ComponentStatus::UpdateAvailable,
+        "the update shown immediately after restart comes from persistent state"
+    );
+    let cached_installation = restarted.installations().await.remove(0);
+    assert!(fake
+        .provider()
+        .plan_update(request(&cached_installation))
+        .await
+        .unwrap_err()
+        .summary
+        .contains("refresh mise"));
+
+    let emitter = Arc::new(MemoryApiEventEmitter::default());
+    let api = ApiService::new(restarted.clone(), fake.store(), emitter.clone());
+    let request = PreviewRequestDto {
+        selections: vec![UpdateSelectionDto {
+            tool_id: selection.tool_id.to_string(),
+            component_id: selection.component_id.to_string(),
+            strategy_id: None,
+            target_version: None,
+        }],
+    };
+    let previous_revision = restarted.snapshot().await.state_revision;
+    let plans = api.preview(request.clone()).await.unwrap();
+    assert_eq!(plans.len(), 1);
+    assert_eq!(plans[0].command.program, fake.program.display().to_string());
+    assert_eq!(
+        plans[0].command.args,
+        [
+            "--cd",
+            fake.home.to_str().unwrap(),
+            "upgrade",
+            "--no-prune",
+            "--yes",
+            "--",
+            "node@22"
+        ]
+    );
+    let before = fake.calls();
+    assert_eq!(
+        before
+            .iter()
+            .filter(|call| call.starts_with("latest "))
+            .count(),
+        2
+    );
+    let snapshot = api.snapshot().await.unwrap();
+    assert_ne!(snapshot.state_revision, previous_revision);
+    let events = emitter.events();
+    assert_eq!(events.len(), 1);
+    let ApiEvent::ToolState(event) = &events[0] else {
+        panic!("preview bootstrap must publish the refreshed inventory");
+    };
+    assert_eq!(event.state_revision, snapshot.state_revision);
+    assert_eq!(event.tool_ids, vec![selection.tool_id.to_string()]);
+    api.preview(request).await.unwrap();
+    assert_eq!(
+        emitter.events().len(),
+        1,
+        "warm previews do not emit spurious refreshes"
+    );
+    let after = fake.calls();
+    for command in ["version", "ls --installed", "latest "] {
+        assert_eq!(
+            before
+                .iter()
+                .filter(|call| call.starts_with(command))
+                .count(),
+            after
+                .iter()
+                .filter(|call| call.starts_with(command))
+                .count(),
+            "a warm preview does not repeat {command}"
+        );
+    }
+    assert!(!after
+        .iter()
+        .any(|call| call.starts_with("upgrade --no-prune")));
+}
+
+#[tokio::test]
+async fn restart_preview_refuses_failed_scan_and_retries_without_a_manual_refresh() {
+    let fake = FakeMise::new();
+    fake.active_node();
+    let selection = fake.persist_available_update().await;
+    let restarted = fake.service();
+    fake.write("installed.fail", "");
+    let error = restarted
+        .preview_updates(std::slice::from_ref(&selection))
+        .await
+        .unwrap_err();
+    assert!(matches!(error, ApplicationError::Provider(_)));
+    assert!(!error.to_string().contains("secret-fixture"));
+    fs::remove_file(fake.temporary.path().join("installed.fail")).unwrap();
+    let plans = restarted.preview_updates(&[selection]).await.unwrap();
+    assert_eq!(
+        plans.len(),
+        1,
+        "a failed bootstrap must not be cached as ready"
+    );
+    assert!(!fake
+        .calls()
+        .iter()
+        .any(|call| call.starts_with("upgrade --no-prune")));
+}
+
+#[tokio::test]
+async fn restart_preview_refuses_failed_package_check_instead_of_using_cached_update() {
+    let fake = FakeMise::new();
+    fake.active_node();
+    let selection = fake.persist_available_update().await;
+    let restarted = fake.service();
+    fake.write("core_node@22.fail", "");
+    let error = restarted
+        .preview_updates(std::slice::from_ref(&selection))
+        .await
+        .unwrap_err();
+    assert!(matches!(error, ApplicationError::Provider(_)));
+    assert!(!error.to_string().contains("secret-fixture"));
+    assert!(matches!(
+        restarted.snapshot().await.tools[0].components[0].status,
+        ComponentStatus::CheckFailed { .. }
+    ));
+    fs::remove_file(fake.temporary.path().join("core_node@22.fail")).unwrap();
+    assert_eq!(
+        restarted.preview_updates(&[selection]).await.unwrap().len(),
+        1
+    );
+    assert!(!fake
+        .calls()
+        .iter()
+        .any(|call| call.starts_with("upgrade --no-prune")));
+}
+
+#[tokio::test]
+async fn preview_refuses_a_provider_disabled_after_it_was_refreshed() {
+    let fake = FakeMise::new();
+    fake.active_node();
+    let service = fake.service();
+    let snapshot = service.refresh_tools(RefreshRequest::all()).await.unwrap();
+    let selection = UpdateSelection {
+        tool_id: snapshot.tools[0].id.clone(),
+        component_id: ComponentId::new("core").unwrap(),
+        strategy_id: None,
+        target_version: None,
+    };
+    let store = fake.store();
+    let loaded = store.load_settings().unwrap();
+    let mut settings = loaded.value;
+    settings
+        .provider_enabled
+        .insert(fake.provider().id(), false);
+    store.save_settings(&loaded.revision, &settings).unwrap();
+    let before = fake.calls();
+    let error = service.preview_updates(&[selection]).await.unwrap_err();
+    assert!(matches!(error, ApplicationError::Provider(_)));
+    assert_eq!(
+        fake.calls(),
+        before,
+        "disabled sources must not be queried or planned"
+    );
 }
 
 #[tokio::test]

@@ -21,7 +21,7 @@ describe("RunsView accessibility", () => {
     await router.push("/runs");
     const wrapper = mount(RunsView, { global: { plugins: [router] } });
     await flushPromises();
-    expect(wrapper.text()).toContain("正在准备更新计划");
+    expect(wrapper.text()).toContain("正在检查更新并准备计划");
     expect(mock.transport.commands.runLog).not.toHaveBeenCalled();
 
     runs.executing = true;

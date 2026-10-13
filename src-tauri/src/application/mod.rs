@@ -25,8 +25,8 @@ use crate::executor::{
 };
 use crate::persistence::{PersistenceStore, Revision, Settings, StoreError, Versioned};
 use crate::providers::{
-    ProviderError, ProviderProgress, ProviderRegistry, ProviderRegistryError, ProviderStatus,
-    ProviderUpdateRequest, Recoverability, UpdateCheck,
+    ProviderError, ProviderOperation, ProviderProgress, ProviderRegistry, ProviderRegistryError,
+    ProviderStatus, ProviderUpdateRequest, Recoverability, UpdateCheck,
 };
 use crate::version::{
     verify_updated_version, ComponentStatus, StatusReason, VerificationStatus, VersionValue,
@@ -220,6 +220,7 @@ struct ServiceState {
     installations: BTreeMap<InstallationId, Installation>,
     snapshot: ApplicationSnapshot,
     provider_refreshed: BTreeMap<ProviderId, Instant>,
+    provider_ready: BTreeSet<ProviderId>,
     plans: BTreeMap<PlanId, UpdatePlan>,
 }
 
@@ -319,6 +320,7 @@ impl ApplicationService {
                     .collect(),
                 snapshot,
                 provider_refreshed: BTreeMap::new(),
+                provider_ready: BTreeSet::new(),
                 plans: BTreeMap::new(),
             }),
         })
@@ -348,12 +350,25 @@ impl ApplicationService {
     pub async fn refresh_tools_with_progress<F>(
         &self,
         request: RefreshRequest,
-        mut on_progress: F,
+        on_progress: F,
     ) -> Result<ApplicationSnapshot, ApplicationError>
     where
         F: FnMut(ProviderRefreshProgress) + Send,
     {
         let _operation = self.operation.lock().await;
+        self.refresh_tools_locked(request, on_progress).await
+    }
+
+    // Callers hold `operation` so preparing a preview can refresh cold providers
+    // without releasing the lock or trying to acquire it recursively.
+    async fn refresh_tools_locked<F>(
+        &self,
+        request: RefreshRequest,
+        mut on_progress: F,
+    ) -> Result<ApplicationSnapshot, ApplicationError>
+    where
+        F: FnMut(ProviderRefreshProgress) + Send,
+    {
         let settings = self.store.load_settings()?;
         let provider_ids = self.provider_ids_for_scope(&request.scope).await?;
         {
@@ -526,6 +541,18 @@ impl ApplicationService {
         let mut state = self.state.write().await;
         state.installations = installations;
         for provider_id in provider_ids {
+            if snapshot.providers.get(&provider_id).is_some_and(|report| {
+                report.enabled
+                    && report
+                        .status
+                        .as_ref()
+                        .is_some_and(|status| status.available)
+                    && report.errors.is_empty()
+            }) {
+                state.provider_ready.insert(provider_id.clone());
+            } else {
+                state.provider_ready.remove(&provider_id);
+            }
             state.provider_refreshed.insert(provider_id, Instant::now());
         }
         state.snapshot = snapshot.clone();
@@ -603,19 +630,14 @@ impl ApplicationService {
     ) -> Result<Vec<UpdatePlanView>, ApplicationError> {
         let _operation = self.operation.lock().await;
         let settings = self.store.load_settings()?;
+        self.prepare_preview_providers(selections, &settings.value)
+            .await?;
         let (tools, installations) = {
             let state = self.state.read().await;
             (state.snapshot.tools.clone(), state.installations.clone())
         };
-        let mut unique = BTreeSet::new();
         let mut plans = Vec::with_capacity(selections.len());
         for selection in selections {
-            if !unique.insert((selection.tool_id.clone(), selection.component_id.clone())) {
-                return Err(ApplicationError::DuplicateSelection {
-                    tool_id: selection.tool_id.clone(),
-                    component_id: selection.component_id.clone(),
-                });
-            }
             let tool = tools
                 .iter()
                 .find(|tool| tool.id == selection.tool_id)
@@ -653,6 +675,21 @@ impl ApplicationService {
             let installation = installations.get(installation_id).ok_or_else(|| {
                 ApplicationError::InstallationUnavailable(installation_id.clone())
             })?;
+            if let (StrategyKind::ProviderDefault, ComponentStatus::CheckFailed { reason }) =
+                (&strategy.kind, &component.status)
+            {
+                return Err(ProviderError::new(
+                    installation.provider_id.clone(),
+                    ProviderOperation::CheckUpdates,
+                    if reason.retryable {
+                        Recoverability::Retryable
+                    } else {
+                        Recoverability::RequiresConfiguration
+                    },
+                    &reason.summary,
+                )
+                .into());
+            }
             let mut command = match &strategy.kind {
                 StrategyKind::ProviderDefault => {
                     let provider =
@@ -718,6 +755,132 @@ impl ApplicationService {
             .plans
             .extend(plans.into_iter().map(|plan| (plan.plan_id, plan)));
         Ok(views)
+    }
+
+    async fn prepare_preview_providers(
+        &self,
+        selections: &[UpdateSelection],
+        settings: &Settings,
+    ) -> Result<(), ApplicationError> {
+        let mut selected_providers = BTreeMap::new();
+        let mut unique = BTreeSet::new();
+        {
+            let state = self.state.read().await;
+            for selection in selections {
+                if !unique.insert((selection.tool_id.clone(), selection.component_id.clone())) {
+                    return Err(ApplicationError::DuplicateSelection {
+                        tool_id: selection.tool_id.clone(),
+                        component_id: selection.component_id.clone(),
+                    });
+                }
+                let tool = state
+                    .snapshot
+                    .tools
+                    .iter()
+                    .find(|tool| tool.id == selection.tool_id)
+                    .ok_or_else(|| ApplicationError::UnknownTool(selection.tool_id.clone()))?;
+                let component = find_component(
+                    &state.snapshot.tools,
+                    &selection.tool_id,
+                    &selection.component_id,
+                )?;
+                let strategy_id = selection
+                    .strategy_id
+                    .as_ref()
+                    .or(component.default_strategy.as_ref())
+                    .ok_or_else(|| ApplicationError::NoDefaultStrategy {
+                        tool_id: selection.tool_id.clone(),
+                        component_id: selection.component_id.clone(),
+                    })?;
+                let strategy = component
+                    .strategies
+                    .iter()
+                    .find(|strategy| &strategy.id == strategy_id && strategy.enabled)
+                    .ok_or_else(|| ApplicationError::UnknownStrategy {
+                        tool_id: selection.tool_id.clone(),
+                        component_id: selection.component_id.clone(),
+                        strategy_id: strategy_id.clone(),
+                    })?;
+                if strategy.kind != StrategyKind::ProviderDefault {
+                    continue;
+                }
+                let installation_id = component
+                    .installation_id
+                    .as_ref()
+                    .or_else(|| tool.installation_ids.first())
+                    .ok_or_else(|| ApplicationError::ToolHasNoInstallation(tool.id.clone()))?;
+                let installation = state.installations.get(installation_id).ok_or_else(|| {
+                    ApplicationError::InstallationUnavailable(installation_id.clone())
+                })?;
+                let needs_refresh = !state.provider_ready.contains(&installation.provider_id)
+                    || matches!(component.status, ComponentStatus::CheckFailed { .. });
+                *selected_providers
+                    .entry(installation.provider_id.clone())
+                    .or_insert(false) |= needs_refresh;
+            }
+        }
+
+        // A persisted tool list is useful immediately after launch, but providers
+        // retain scan metadata and successful checks only in memory. Rebuild that
+        // state before planning any commands, and only for the selected sources.
+        for (provider_id, needs_refresh) in selected_providers {
+            let registration = self
+                .registry
+                .list()
+                .into_iter()
+                .find(|registration| registration.id == provider_id)
+                .ok_or_else(|| ApplicationError::UnknownProvider(provider_id.clone()))?;
+            if !registration.enabled
+                || !settings
+                    .provider_enabled
+                    .get(&provider_id)
+                    .copied()
+                    .unwrap_or(true)
+            {
+                return Err(ProviderError::new(
+                    provider_id,
+                    ProviderOperation::PlanUpdate,
+                    Recoverability::RequiresConfiguration,
+                    "更新来源已禁用，请先在设置中启用该来源",
+                )
+                .into());
+            }
+            if needs_refresh {
+                self.refresh_tools_locked(
+                    RefreshRequest {
+                        scope: RefreshScope::Provider {
+                            provider_id: provider_id.clone(),
+                        },
+                        force: true,
+                    },
+                    |_| {},
+                )
+                .await?;
+            }
+            let state = self.state.read().await;
+            let report = state
+                .snapshot
+                .providers
+                .get(&provider_id)
+                .ok_or_else(|| ApplicationError::UnknownProvider(provider_id.clone()))?;
+            if let Some(error) = report.errors.first() {
+                return Err(error.clone().into());
+            }
+            if !report
+                .status
+                .as_ref()
+                .is_some_and(|status| status.available)
+            {
+                return Err(ProviderError::new(
+                    provider_id,
+                    ProviderOperation::PlanUpdate,
+                    Recoverability::RequiresConfiguration,
+                    "更新来源当前不可用，请检查安装路径后重试",
+                )
+                .into());
+            }
+        }
+        Ok(())
     }
 
     pub async fn confirm_update(
@@ -1031,6 +1194,7 @@ impl ApplicationService {
         state.snapshot.config_revision = settings.revision.as_str().into();
         state.snapshot.state_revision = saved.as_str().into();
         state.provider_refreshed.clear();
+        state.provider_ready.clear();
         Ok(state.snapshot.clone())
     }
 
@@ -1138,16 +1302,21 @@ impl ApplicationService {
                 let verification = verify_updated_version(previous_version, Ok(detected.as_ref()));
                 (verification, detected)
             }
-            Err(error) => (
-                VerificationStatus::VerificationFailed {
-                    reason: StatusReason::new(
-                        "post_check_provider_failed",
-                        error.summary,
-                        error.recoverability == Recoverability::Retryable,
-                    ),
-                },
-                None,
-            ),
+            Err(error) => {
+                // Some providers discard scan/check metadata after a failed scan.
+                // A later preview must rebuild it even if refresh succeeded earlier.
+                self.state.write().await.provider_ready.remove(&provider_id);
+                (
+                    VerificationStatus::VerificationFailed {
+                        reason: StatusReason::new(
+                            "post_check_provider_failed",
+                            error.summary,
+                            error.recoverability == Recoverability::Retryable,
+                        ),
+                    },
+                    None,
+                )
+            }
         }
     }
 
