@@ -17,16 +17,15 @@
           <span aria-hidden="true">↗</span>
           运行记录
         </RouterLink>
+        <RouterLink to="/skills">
+          <span aria-hidden="true">✦</span>
+          Skills
+        </RouterLink>
+        <RouterLink to="/mcp"><span aria-hidden="true">⊞</span>MCP</RouterLink>
         <RouterLink to="/settings">
           <span aria-hidden="true">⌘</span>
           设置
         </RouterLink>
-        <RouterLink to="/skills">
-          <span aria-hidden="true">✦</span>
-          Skills
-
-        </RouterLink>
-        <RouterLink to="/mcp"><span aria-hidden="true">⊞</span>MCP</RouterLink>
       </nav>
       <div class="topbar-actions">
         <RefreshMenu />

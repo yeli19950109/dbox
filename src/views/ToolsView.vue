@@ -106,6 +106,9 @@
           </span>
           <span v-if="lastChecked">上次检查：{{ lastChecked }}</span>
         </div>
+        <p v-if="providerFilter === 'pi-extensions'" class="provider-scope-note">
+          Pi 用户级托管 npm 扩展包；按配置的版本范围检查，固定版本不自动更新。
+        </p>
 
         <div v-if="store.error" class="inline-error" role="alert">
           <span>{{ store.error }}</span>
@@ -218,6 +221,9 @@
           class="detail-block"
         >
           <strong>{{ component.displayName }}</strong>
+          <p v-if="detailRecord.providerIds.includes('pi-extensions')">
+            已安装 {{ component.installedVersion ?? "未知" }} · 可用版本 {{ component.latestVersion ?? "尚未确定" }}
+          </p>
           <p v-if="component.status.reason" class="reason">
             {{ component.status.reason.summary }}
           </p>
@@ -544,6 +550,12 @@ onMounted(initialize);
 </script>
 
 <style scoped>
+.provider-scope-note {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .refresh-progress__summary strong {
   overflow-wrap: anywhere;
 }

@@ -37,6 +37,23 @@
 
 ## 验证记录
 
+### 2026-10-13：扩展更新支持调整
+
+旧实现仅提供 `extensions` 占位组件和 `pi update --extensions` 策略，
+`version_tracking = unsupported`，并未发现或检查实际扩展包。
+现在内置 `pi-extensions` Provider 将 Pi 用户级托管 npm 包分别建为 Installation/Tool，
+复用 Provider 的刷新、预览、更新与安装版本复查；生产 manifest 移除旧占位组件，
+避免 Pi Core 因扩展未知状态一直显示「部分未知」。上述 T12 验证记录保留为原始实现记录。
+
+范围为 Pi agent 目录下声明并托管的 npm 包；按原始版本范围或 dist-tag 查询可用版本，
+精确版本不自动更新。更新单个包使用 `pi update --extension <source> --no-approve`，
+项目配置、Git/本地包和旧全局 npm 安装不纳入该 Provider。
+
+依据：[Pi package commands](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/cli.md#package-commands)
+及本机 Pi 1.2.0 的 package-manager 实现。
+
+### 原始实现记录（2026-08-27）
+
 - 完成日期：2026-08-27
 - 关键文件：`src-tauri/resources/catalog/pi.toml`、`src-tauri/src/catalog/mod.rs`、`src-tauri/tests/catalog_pi_enrichment.rs`
 - 执行命令：`cargo fmt --check`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test`

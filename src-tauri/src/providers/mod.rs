@@ -14,6 +14,7 @@ use crate::version::{ComponentStatus, VersionValue};
 pub mod homebrew;
 pub mod mise;
 pub mod npm_global;
+pub mod pi_extensions;
 
 pub use homebrew::{
     BrewDiagnostic, BrewEnvironment, HomebrewProvider, HomebrewProviderOptions,
@@ -22,6 +23,10 @@ pub use homebrew::{
 pub use mise::{MiseProvider, MiseProviderOptions, MISE_PROVIDER_ID};
 pub use npm_global::{
     NpmDiagnostic, NpmEnvironment, NpmGlobalProvider, NpmProviderOptions, NPM_GLOBAL_PROVIDER_ID,
+};
+
+pub use pi_extensions::{
+    PiExtensionsProvider, PiExtensionsProviderOptions, PI_EXTENSIONS_PROVIDER_ID,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -236,6 +241,13 @@ pub trait ToolProvider: Send + Sync {
         &self,
         request: ProviderUpdateRequest,
     ) -> Result<ProviderUpdatePlan, ProviderError>;
+
+    /// Revalidate external provider configuration immediately before executing a
+    /// previously reviewed plan. Providers without external mutable state retain
+    /// their existing behavior by default.
+    async fn validate_update_plan(&self, _plan: &ProviderUpdatePlan) -> Result<(), ProviderError> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

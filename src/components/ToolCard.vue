@@ -21,6 +21,9 @@
     >
       <div class="tool-card__name">
         <h2>{{ record.tool.displayName }}</h2>
+        <span v-if="piExtensionVersion" class="tool-card__version" :title="piExtensionVersion">
+          {{ piExtensionVersion }}
+        </span>
         <span
           v-for="installation in miseInstallations"
           :key="installation.id"
@@ -36,8 +39,8 @@
         </span>
         <span v-if="!record.providerIds.length" class="source-badge">来源待刷新</span>
       </span>
-      <span class="tool-card__statuses">
-        <span class="status-pill" :data-status="record.tool.status.status">
+      <span v-if="showStatus || record.tool.hidden" class="tool-card__statuses">
+        <span v-if="showStatus" class="status-pill" :data-status="record.tool.status.status">
           {{ statusLabel(record.tool.status.status) }}
         </span>
         <span v-if="record.tool.hidden" class="quiet-pill">已隐藏</span>
@@ -46,7 +49,7 @@
     </button>
     <button
       v-if="updateable.length"
-      class="button secondary tool-card__update"
+      class="button tool-card__update"
       type="button"
       :disabled="updateDisabled"
       :aria-label="`更新 ${summaryName}`"
@@ -75,9 +78,19 @@ defineEmits<{
 }>();
 
 const updateable = computed(() => updateableComponents(props.record.tool));
+const showStatus = computed(
+  () => props.record.tool.status.status !== "update_available" || !updateable.value.length,
+);
 const miseInstallations = computed(() =>
   props.record.installations.filter((installation) => installation.providerId === "mise"),
 );
+const piExtensionVersion = computed(() => {
+  if (!props.record.providerIds.includes("pi-extensions")) return null;
+  const component = props.record.tool.components.find((item) => item.id === "core");
+  const installed = component?.installedVersion ?? "版本未知";
+  return component?.status.status === "update_available" && component.latestVersion
+    ? `${installed} → ${component.latestVersion}` : installed;
+});
 const summaryName = computed(() =>
   [props.record.tool.displayName, ...miseInstallations.value.map(miseInstallationLabel)].join(" "),
 );
@@ -109,6 +122,31 @@ function statusLabel(status: string): string {
 </script>
 
 <style scoped>
+.tool-card {
+  position: relative;
+  padding-right: 33px;
+}
+
+.tool-card__summary {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.tool-card__summary:has(.tool-card__statuses) {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.tool-card__disclosure {
+  position: absolute;
+  inset: 0 7px 0 auto;
+  width: 22px;
+  display: grid;
+  place-items: center;
+}
+
+.tool-card__sources:has([data-provider="Pi Extensions"]) {
+  width: auto;
+}
+
 .tool-card:has(.tool-card__update) {
   grid-template-columns: 36px minmax(0, 1fr) auto;
 }
@@ -117,6 +155,9 @@ function statusLabel(status: string): string {
   min-height: 30px;
   padding: 4px 10px;
   margin-left: 4px;
+  color: var(--accent-ink);
+  background: var(--accent);
   font-size: 12px;
+  white-space: nowrap;
 }
 </style>

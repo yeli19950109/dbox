@@ -9,7 +9,6 @@ use dbox_lib::domain::{
     ProviderId, StrategyId, StrategyKind,
 };
 use dbox_lib::persistence::{AppPaths, PersistenceStore};
-use dbox_lib::version::ComponentStatus;
 use tempfile::TempDir;
 
 fn installation(
@@ -86,24 +85,9 @@ fn built_in_pi_enriches_one_generic_installation_without_hiding_unknown_tools() 
         .iter()
         .any(|strategy| strategy.id.as_str() == "npm-global"));
 
-    let extensions = pi_tools[0]
-        .components
-        .iter()
-        .find(|component| component.id.as_str() == "extensions")
-        .unwrap();
-    assert!(matches!(
-        extensions.status,
-        ComponentStatus::Unsupported { .. }
-    ));
-    let strategy = &extensions.strategies[0];
-    assert_eq!(strategy.id.as_str(), "pi-extensions");
-    assert_eq!(
-        strategy.kind,
-        StrategyKind::Command {
-            program: "pi".into(),
-            args: vec!["update".into(), "--extensions".into()]
-        }
-    );
+    // Extensions are independent installations from the pi-extensions provider.
+    // The core must not retain an unsupported placeholder that hides its real status.
+    assert_eq!(pi_tools[0].components.len(), 1);
     assert!(pi_tools[0]
         .components
         .iter()

@@ -15,7 +15,7 @@ use dbox_lib::application::{
     ConfirmUpdateRequest, RefreshRequest, RefreshScope, ResolverApplicationEnvironment,
     UpdateSelection,
 };
-use dbox_lib::catalog::{built_in_manifests, Catalog};
+use dbox_lib::catalog::{built_in_manifests, Catalog, CatalogLayer, LoadedManifest};
 use dbox_lib::domain::{
     ComponentId, Installation, InstallationScope, PackageCoordinate, PackageKind, ProviderId,
     RunStatus, StrategyId,
@@ -149,6 +149,36 @@ fn checked(installation: &Installation, latest: &str) -> UpdateCheck {
     }
 }
 
+fn catalog_with_fixture_component() -> Catalog {
+    // Exercise generic multi-component planning independently of the production
+    // Pi catalog, whose npm extensions now have their own Provider installations.
+    let mut manifests = built_in_manifests();
+    manifests.push(
+        LoadedManifest::parse(
+            "fixture-multi-component.toml",
+            CatalogLayer::User,
+            r#"
+schema_version = 1
+id = "pi"
+
+[[components]]
+id = "fixture-extra"
+display_name = "Fixture extra component"
+default_strategy = "fixture-extra"
+
+[[components.update_strategies]]
+id = "fixture-extra"
+display_name = "Fixture extra update"
+kind = "command"
+program = "pi"
+args = ["fixture-extra"]
+"#,
+        )
+        .unwrap(),
+    );
+    Catalog::build(manifests).unwrap()
+}
+
 #[tokio::test]
 async fn refresh_is_deduplicated_and_one_provider_failure_does_not_block_others() {
     let fixture = Fixture::new();
@@ -220,7 +250,7 @@ async fn refresh_is_deduplicated_and_one_provider_failure_does_not_block_others(
 }
 
 #[tokio::test]
-async fn pi_preferences_and_component_plans_are_deterministic_and_never_use_all() {
+async fn catalog_preferences_and_component_plans_are_deterministic_and_never_use_all() {
     let fixture = Fixture::new();
     let pi = installation(
         "npm-global",
@@ -243,11 +273,7 @@ async fn pi_preferences_and_component_plans_are_deterministic_and_never_use_all(
         ("pi".into(), fixture.program.clone()),
         ("npm".into(), fixture.program.clone()),
     ])));
-    let service = fixture.service(
-        registry,
-        Catalog::build(built_in_manifests()).unwrap(),
-        environment,
-    );
+    let service = fixture.service(registry, catalog_with_fixture_component(), environment);
     let snapshot = service.refresh_tools(RefreshRequest::all()).await.unwrap();
     assert_eq!(snapshot.tools.len(), 2);
     let pi_tool = snapshot
@@ -301,7 +327,7 @@ async fn pi_preferences_and_component_plans_are_deterministic_and_never_use_all(
             },
             UpdateSelection {
                 tool_id: pi_tool_id,
-                component_id: ComponentId::new("extensions").unwrap(),
+                component_id: ComponentId::new("fixture-extra").unwrap(),
                 strategy_id: None,
                 target_version: None,
             },
@@ -310,7 +336,7 @@ async fn pi_preferences_and_component_plans_are_deterministic_and_never_use_all(
         .unwrap();
     assert_eq!(batch.len(), 2);
     assert_eq!(batch[0].command.args, ["update", "--self"]);
-    assert_eq!(batch[1].command.args, ["update", "--extensions"]);
+    assert_eq!(batch[1].command.args, ["fixture-extra"]);
     assert!(batch
         .iter()
         .all(|plan| !plan.command.args.iter().any(|argument| argument == "--all")));
@@ -340,11 +366,7 @@ async fn resolving_later_commands_does_not_invalidate_earlier_plans_in_the_same_
             fixture.temporary.path().to_owned(),
         ),
     ));
-    let service = fixture.service(
-        registry,
-        Catalog::build(built_in_manifests()).unwrap(),
-        environment,
-    );
+    let service = fixture.service(registry, catalog_with_fixture_component(), environment);
     let snapshot = service.refresh_tools(RefreshRequest::all()).await.unwrap();
     let tool_id = snapshot.tools[0].id.clone();
     let plans = service
@@ -357,7 +379,7 @@ async fn resolving_later_commands_does_not_invalidate_earlier_plans_in_the_same_
             },
             UpdateSelection {
                 tool_id,
-                component_id: ComponentId::new("extensions").unwrap(),
+                component_id: ComponentId::new("fixture-extra").unwrap(),
                 strategy_id: None,
                 target_version: None,
             },

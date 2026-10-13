@@ -2,7 +2,7 @@
 
 dbox is a local manager for discovering, inspecting, and updating command-line tools.
 
-Built-in providers: npm global, Homebrew, and mise. Providers are discovered from PATH;
+Built-in providers: npm global, Homebrew, mise, and Pi Extensions. Providers are discovered from PATH;
 an executable path override can be configured in Settings.
 
 The mise provider lists every installed version and marks globally enabled versions.
@@ -10,6 +10,18 @@ Updates follow the selected global version request and preserve older installati
 Inactive versions, linked installations, and special requests such as `path:` remain
 read-only. Custom target versions and project configuration updates are not supported.
 See [mise provider details](docs/tasks/23-mise-provider.md).
+
+Pi Extensions discovers the personal npm packages declared in
+`~/.pi/agent/settings.json` (or `PI_CODING_AGENT_DIR`) and installed under
+`npm/node_modules` in that agent directory. Each package appears as a separate tool
+with its own installed version, available version and update action. Checks use the
+configured npm version range or dist-tag; exact versions stay pinned. Updating one
+package runs `pi update --extension <source> --no-approve`, preserving Pi's package
+management and excluding project settings. Pi Core keeps its own update strategies.
+Git/local packages, project packages, legacy npm-global installations and custom Pi
+`npmCommand` wrappers are outside this provider's scope; lookup failures remain visible
+instead of being reported as up to date. Legacy global packages remain visible through
+the npm-global provider.
 
 ## Validation
 

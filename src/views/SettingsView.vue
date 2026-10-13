@@ -32,6 +32,10 @@
             <span>mise 路径</span>
             <input v-model="draft.executableOverrides.mise" type="text" placeholder="/opt/homebrew/bin/mise" />
           </label>
+          <label>
+            <span>pi 路径</span>
+            <input v-model="draft.executableOverrides.pi" type="text" placeholder="/opt/homebrew/bin/pi" />
+          </label>
         </div>
       </section>
 
@@ -46,7 +50,7 @@
         <div class="toggle-grid">
           <label v-for="provider in providerIds" :key="provider" class="toggle-control">
             <span>
-              <strong>{{ provider }}</strong>
+              <strong>{{ providerLabel(provider) }}</strong>
               <small>{{ providerStatus(provider) }}</small>
             </span>
             <input
@@ -178,6 +182,7 @@ import AppLoading from "../components/AppLoading.vue";
 import { useNotificationsStore } from "../stores/notifications";
 import { useSettingsStore } from "../stores/settings";
 import { useSnapshotStore } from "../stores/snapshot";
+import { providerLabel } from "../utils/presentation";
 
 const settings = useSettingsStore();
 const snapshots = useSnapshotStore();
@@ -212,6 +217,7 @@ function cloneSettings(value: SettingsValueDto): SettingsValueDto {
   copy.executableOverrides.npm ??= "";
   copy.executableOverrides.brew ??= "";
   copy.executableOverrides.mise ??= "";
+  copy.executableOverrides.pi ??= "";
   return copy;
 }
 

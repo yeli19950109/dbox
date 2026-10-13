@@ -1,7 +1,7 @@
 schema_version = 1
 id = "pi"
 display_name = "Pi"
-description = "Agentic coding TUI with independently updateable core and extensions"
+description = "Agentic coding TUI; npm extension packages are managed by the pi-extensions provider"
 categories = ["agent", "tui"]
 homepage = "https://pi.dev"
 
@@ -47,17 +47,3 @@ kind = "package_manager"
 manager = "npm"
 args = ["install", "--global", "--", "@earendil-works/pi-coding-agent@latest"]
 timeout_seconds = 600
-
-[[components]]
-id = "extensions"
-display_name = "Extensions"
-default_strategy = "pi-extensions"
-version_tracking = "unsupported"
-
-[[components.update_strategies]]
-id = "pi-extensions"
-display_name = "Pi extensions update"
-kind = "command"
-program = "pi"
-args = ["update", "--extensions"]
-timeout_seconds = 900

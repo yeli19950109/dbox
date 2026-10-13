@@ -22,8 +22,8 @@ use crate::persistence::{
     AppPaths, PersistenceStore, Revision, Settings, StoreError, StoreErrorKind,
 };
 use crate::providers::{
-    HomebrewProvider, MiseProvider, NpmGlobalProvider, ProviderRegistry, ProviderRegistryError,
-    Recoverability,
+    HomebrewProvider, MiseProvider, NpmGlobalProvider, PiExtensionsProvider, ProviderRegistry,
+    ProviderRegistryError, Recoverability,
 };
 use crate::version::VersionValue;
 
@@ -127,10 +127,21 @@ impl ApiService {
             settings.value.executable_overrides.get("mise"),
             store.paths().data_dir.join("unavailable/mise"),
         );
+        let pi_path = resolve_provider_program(
+            &provider_resolver,
+            "pi",
+            settings.value.executable_overrides.get("pi"),
+            store.paths().data_dir.join("unavailable/pi"),
+        );
         let mut registry = ProviderRegistry::new();
-        registry.register(Arc::new(NpmGlobalProvider::new(npm_path)))?;
+        registry.register(Arc::new(NpmGlobalProvider::new(npm_path.clone())))?;
         registry.register(Arc::new(HomebrewProvider::new(brew_path)))?;
         registry.register(Arc::new(MiseProvider::new(mise_path)))?;
+        registry.register(Arc::new(PiExtensionsProvider::new(
+            pi_path,
+            npm_path,
+            pi_agent_dir()?,
+        )))?;
         let catalog = load_catalog_with_built_ins(store.paths().manifests_dir());
         let event_sink = Arc::new(BufferedExecutionEventSink::new(
             Arc::clone(&emitter),
@@ -620,6 +631,24 @@ impl ApiState {
         let emitter: Arc<dyn ApiEventEmitter> = Arc::new(TauriApiEventEmitter::new(handle.clone()));
         let paths = AppPaths::from_tauri(handle.path())?;
         Ok(Self::new(Arc::new(ApiService::production(paths, emitter)?)))
+    }
+}
+
+fn pi_agent_dir() -> Result<PathBuf, std::io::Error> {
+    let home =
+        dirs::home_dir().ok_or_else(|| std::io::Error::other("home directory unavailable"))?;
+    let configured = std::env::var_os("PI_CODING_AGENT_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".pi/agent"));
+    let expanded = configured
+        .strip_prefix("~")
+        .map(|suffix| home.join(suffix))
+        .unwrap_or(configured.clone());
+    if expanded.is_absolute() {
+        Ok(expanded)
+    } else {
+        Ok(std::env::current_dir()?.join(expanded))
     }
 }
 

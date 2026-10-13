@@ -826,6 +826,38 @@ impl ApplicationService {
                 now,
             },
         )?;
+        // Providers may depend on external settings that are not part of dbox's
+        // configuration revision. Revalidate those before accepting the batch.
+        if component.strategies.iter().any(|strategy| {
+            strategy.id == confirmed.plan().strategy_id
+                && matches!(strategy.kind, StrategyKind::ProviderDefault)
+        }) {
+            let plan = confirmed.plan();
+            let provider_id = self
+                .state
+                .read()
+                .await
+                .installations
+                .get(&plan.installation_id)
+                .map(|installation| installation.provider_id.clone())
+                .ok_or_else(|| {
+                    ApplicationError::InstallationUnavailable(plan.installation_id.clone())
+                })?;
+            let provider = self
+                .registry
+                .get(&provider_id)
+                .ok_or_else(|| ApplicationError::UnknownProvider(provider_id.clone()))?;
+            provider
+                .validate_update_plan(&crate::providers::ProviderUpdatePlan {
+                    provider_id,
+                    installation_id: plan.installation_id.clone(),
+                    component_id: plan.component_id.clone(),
+                    strategy_id: plan.strategy_id.clone(),
+                    program: plan.command.program.to_string_lossy().into_owned(),
+                    args: plan.command.args.clone(),
+                })
+                .await?;
+        }
         Ok(PreparedUpdate {
             plan: confirmed,
             previous_version: component.installed_version,

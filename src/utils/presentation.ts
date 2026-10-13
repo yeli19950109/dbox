@@ -12,7 +12,7 @@ export type ToolRecord = {
 };
 
 export function providerLabel(providerId: string): string {
-  return ({ "npm-global": "npm", homebrew: "brew" } as Record<string, string>)[providerId] ?? providerId;
+  return ({ "npm-global": "npm", homebrew: "brew", "pi-extensions": "Pi Extensions" } as Record<string, string>)[providerId] ?? providerId;
 }
 
 export function miseInstallationLabel(installation: InstallationDto): string {

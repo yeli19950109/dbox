@@ -5,6 +5,20 @@ import { installation, tool } from "../test/fixtures";
 import ToolCard from "./ToolCard.vue";
 
 describe("ToolCard", () => {
+  it("shows the Pi extension source, available version and direct update action", () => {
+    const extension = tool(0, "pi-extensions");
+    extension.displayName = "@example/pi-tools";
+    const wrapper = mount(ToolCard, {
+      props: {
+        record: { tool: extension, installations: [installation(0, "pi-extensions")], providerIds: ["pi-extensions"] },
+        selected: new Set<string>(),
+      },
+    });
+    expect(wrapper.get(".source-badge").text()).toBe("Pi Extensions");
+    expect(wrapper.get(".tool-card__version").text()).toBe("1.0.0 → 2.0.0");
+    expect(wrapper.get('button[aria-label="更新 @example/pi-tools"]').exists()).toBe(true);
+  });
+
   it("distinguishes coexisting mise versions and their global activation", () => {
     for (const scope of ["global", "user"]) {
       const mise = installation(0, "mise");
