@@ -152,12 +152,13 @@ function statusLabel(status: string): string {
 }
 
 .tool-card__update {
-  min-height: 30px;
-  padding: 4px 10px;
+  min-height: 20px;
+  padding: 4px 7px;
   margin-left: 4px;
+  border-radius: 5px;
   color: var(--accent-ink);
   background: var(--accent);
-  font-size: 12px;
+  font: 500 10px/1 "DM Mono", monospace;
   white-space: nowrap;
 }
 </style>
