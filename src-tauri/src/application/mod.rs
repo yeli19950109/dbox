@@ -271,8 +271,10 @@ impl ApplicationService {
     ) -> Result<Self, ApplicationError> {
         let settings = store.load_settings()?;
         let cached = store.load_state()?;
+        let mut tools = cached.value.tools;
+        apply_provider_capabilities(&mut tools, &cached.value.installations, &registry);
         let snapshot = ApplicationSnapshot {
-            tools: cached.value.tools,
+            tools,
             providers: registry
                 .list()
                 .into_iter()
@@ -523,6 +525,7 @@ impl ApplicationService {
         let mut tools = catalog_snapshot.tools;
         apply_component_memory(&mut tools, &previous_components);
         apply_checks(&mut tools, &fresh_checks);
+        apply_provider_capabilities(&mut tools, &installation_values, &self.registry);
         apply_strategy_preferences(&mut tools, &settings.value);
         tools.sort_by(|left, right| left.id.cmp(&right.id));
 
@@ -1182,6 +1185,7 @@ impl ApplicationService {
         let catalog_snapshot = catalog.enrich(&installations);
         let mut tools = catalog_snapshot.tools;
         apply_component_memory(&mut tools, &memory);
+        apply_provider_capabilities(&mut tools, &installations, &self.registry);
         apply_strategy_preferences(&mut tools, &settings.value);
         tools.sort_by(|left, right| left.id.cmp(&right.id));
         let saved = self.persist_tools(&tools, previous_snapshot.refreshed_at, None, None)?;
@@ -1385,6 +1389,43 @@ fn apply_checks(tools: &mut [Tool], checks: &BTreeMap<(InstallationId, Component
                 .clone_from(&check.installed_version);
             component.latest_version.clone_from(&check.latest_version);
             component.status.clone_from(&check.status);
+        }
+    }
+}
+
+fn apply_provider_capabilities(
+    tools: &mut [Tool],
+    installations: &[Installation],
+    registry: &ProviderRegistry,
+) {
+    let read_only: BTreeSet<_> = installations
+        .iter()
+        .filter(|installation| {
+            registry
+                .get(&installation.provider_id)
+                .is_some_and(|provider| !provider.capabilities().update)
+        })
+        .map(|installation| &installation.id)
+        .collect();
+    for tool in tools {
+        for component in &mut tool.components {
+            let installation_id = component
+                .installation_id
+                .as_ref()
+                .or_else(|| tool.installation_ids.first());
+            if installation_id.is_some_and(|id| read_only.contains(id)) {
+                component
+                    .strategies
+                    .retain(|strategy| !matches!(strategy.kind, StrategyKind::ProviderDefault));
+                if component.default_strategy.as_ref().is_some_and(|id| {
+                    !component
+                        .strategies
+                        .iter()
+                        .any(|strategy| &strategy.id == id && strategy.enabled)
+                }) {
+                    component.default_strategy = None;
+                }
+            }
         }
     }
 }

@@ -26,6 +26,37 @@ function testRouter() {
 describe("ToolsView", () => {
   beforeEach(() => setActivePinia(createPinia()));
 
+  it("shows read-only release updates without update actions or an empty strategy selector", async () => {
+    const snapshot = snapshotWithTools(1);
+    snapshot.tools[0]!.displayName = "DashBeam";
+    snapshot.installations[0]!.providerId = "github-releases";
+    const component = snapshot.tools[0]!.components[0]!;
+    component.installedVersion = "0.7.0";
+    component.latestVersion = "0.7.1";
+    component.strategies = [];
+    component.defaultStrategy = null;
+    const mock = createMockTransport({ snapshot: vi.fn(() => ok(snapshot)) });
+    setTransportForTests(mock.transport);
+    useSnapshotStore().acceptSnapshot(snapshot);
+    const router = testRouter();
+    await router.push("/tools");
+    const wrapper = mount(ToolsView, { attachTo: document.body, global: { plugins: [router] } });
+    await flushPromises();
+
+    expect(wrapper.get(".tool-card__version").text()).toBe("0.7.0 → 0.7.1");
+    expect(wrapper.get(".tool-card .status-pill").text()).toBe("有更新");
+    expect(wrapper.find(".tool-card__update").exists()).toBe(false);
+    expect(wrapper.find('.tool-card input[type="checkbox"]').exists()).toBe(false);
+    expect(wrapper.get('button[title="直接更新当前筛选结果中的所有可更新项"]').attributes("disabled")).toBeDefined();
+    await wrapper.get(".tool-card__summary").trigger("click");
+    const detail = wrapper.get('[role="dialog"]');
+    expect(detail.text()).toContain("已安装 0.7.0 · 可用版本 0.7.1");
+    expect(detail.text()).toContain("仅检查更新");
+    expect(detail.find("select").exists()).toBe(false);
+    expect(mock.transport.commands.preview).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it("keeps a 500-item list DOM bounded with TanStack Virtual", async () => {
     const snapshot = snapshotWithTools(500);
     const records = mapToolRecords(snapshot);

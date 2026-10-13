@@ -21,8 +21,8 @@
     >
       <div class="tool-card__name">
         <h2>{{ record.tool.displayName }}</h2>
-        <span v-if="piExtensionVersion" class="tool-card__version" :title="piExtensionVersion">
-          {{ piExtensionVersion }}
+        <span v-if="packageVersion" class="tool-card__version" :title="packageVersion">
+          {{ packageVersion }}
         </span>
         <span
           v-for="installation in miseInstallations"
@@ -84,8 +84,8 @@ const showStatus = computed(
 const miseInstallations = computed(() =>
   props.record.installations.filter((installation) => installation.providerId === "mise"),
 );
-const piExtensionVersion = computed(() => {
-  if (!props.record.providerIds.includes("pi-extensions")) return null;
+const packageVersion = computed(() => {
+  if (!props.record.providerIds.some((id) => ["pi-extensions", "github-releases"].includes(id))) return null;
   const component = props.record.tool.components.find((item) => item.id === "core");
   const installed = component?.installedVersion ?? "版本未知";
   return component?.status.status === "update_available" && component.latestVersion
@@ -143,7 +143,8 @@ function statusLabel(status: string): string {
   place-items: center;
 }
 
-.tool-card__sources:has([data-provider="Pi Extensions"]) {
+.tool-card__sources:has([data-provider="Pi Extensions"]),
+.tool-card__sources:has([data-provider="GitHub Releases"]) {
   width: auto;
 }
 

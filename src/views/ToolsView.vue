@@ -109,6 +109,9 @@
         <p v-if="providerFilter === 'pi-extensions'" class="provider-scope-note">
           Pi 用户级托管 npm 扩展包；按配置的版本范围检查，固定版本不自动更新。
         </p>
+        <p v-if="providerFilter === 'github-releases'" class="provider-scope-note">
+          仅检查应用版本与 GitHub 最新稳定版；请通过应用自身更新。
+        </p>
 
         <div v-if="store.error" class="inline-error" role="alert">
           <span>{{ store.error }}</span>
@@ -221,13 +224,13 @@
           class="detail-block"
         >
           <strong>{{ component.displayName }}</strong>
-          <p v-if="detailRecord.providerIds.includes('pi-extensions')">
+          <p>
             已安装 {{ component.installedVersion ?? "未知" }} · 可用版本 {{ component.latestVersion ?? "尚未确定" }}
           </p>
           <p v-if="component.status.reason" class="reason">
             {{ component.status.reason.summary }}
           </p>
-          <label>
+          <label v-if="component.strategies.some((item) => item.enabled)">
             <span>更新策略</span>
             <select
               :value="strategyFor(detailRecord, component.id)"
@@ -244,6 +247,7 @@
               </option>
             </select>
           </label>
+          <p v-else class="reason">仅检查更新，请通过软件自身或安装来源更新。</p>
         </article>
       </section>
       <section>

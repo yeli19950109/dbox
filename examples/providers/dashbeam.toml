@@ -1,0 +1,8 @@
+# Place this file in dbox's providers.d directory.
+# Checks only: dbox never launches or updates DashBeam.
+schema_version = 1
+id = "dashbeam"
+display_name = "DashBeam"
+app_path = "/Applications/DashBeam.app"
+bundle_id = "com.dashbeam.desktop"
+repository = "tonyantony300/dashbeam"

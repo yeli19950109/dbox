@@ -98,6 +98,10 @@ impl AppPaths {
     pub fn manifests_dir(&self) -> PathBuf {
         self.config_dir.join("tools.d")
     }
+
+    pub fn provider_configs_dir(&self) -> PathBuf {
+        self.config_dir.join("providers.d")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

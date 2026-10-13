@@ -11,11 +11,13 @@ use thiserror::Error;
 use crate::domain::{ComponentId, Installation, InstallationId, ProviderId, StrategyId};
 use crate::version::{ComponentStatus, VersionValue};
 
+pub mod github_releases;
 pub mod homebrew;
 pub mod mise;
 pub mod npm_global;
 pub mod pi_extensions;
 
+pub use github_releases::{GitHubReleasesProvider, GITHUB_RELEASES_PROVIDER_ID};
 pub use homebrew::{
     BrewDiagnostic, BrewEnvironment, HomebrewProvider, HomebrewProviderOptions,
     HOMEBREW_PROVIDER_ID,

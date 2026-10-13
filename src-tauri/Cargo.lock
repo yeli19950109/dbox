@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "dbox"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "async-trait",
  "atomic-write-file",
@@ -658,6 +658,7 @@ dependencies = [
  "chrono",
  "dirs",
  "fix-path-env",
+ "plist",
  "process-wrap",
  "regex",
  "reqwest 0.12.28",

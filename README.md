@@ -2,7 +2,7 @@
 
 dbox is a local manager for discovering, inspecting, and updating command-line tools.
 
-Built-in providers: npm global, Homebrew, mise, and Pi Extensions. Providers are discovered from PATH;
+Built-in providers: npm global, Homebrew, mise, Pi Extensions, and GitHub Releases. Command-line providers are discovered from PATH;
 an executable path override can be configured in Settings.
 
 The mise provider lists every installed version and marks globally enabled versions.
@@ -22,6 +22,21 @@ Git/local packages, project packages, legacy npm-global installations and custom
 `npmCommand` wrappers are outside this provider's scope; lookup failures remain visible
 instead of being reported as up to date. Legacy global packages remain visible through
 the npm-global provider.
+
+GitHub Releases checks explicitly configured macOS applications without launching or
+updating them. Each `providers.d/*.toml` file declares an application path, expected
+bundle identifier, and public GitHub repository. dbox reads the application's
+`CFBundleShortVersionString` and compares it with GitHub's latest stable release.
+Missing or invalid versions and network failures are reported; these applications
+never receive a Provider update action or enter one-click updates.
+
+For DashBeam, copy [the example configuration](examples/providers/dashbeam.toml) to
+`~/Library/Application Support/com.yel.dbox/providers.d/dashbeam.toml`, then refresh
+the **GitHub Releases** source. Adjust `app_path` if installed elsewhere. This is a
+Provider configuration file, separate from the Catalog editor's `tools.d` manifests.
+Checks use the public GitHub API without a token; API rate limits are shown as check
+failures. No update commands, downloads of release assets, or application changes are
+performed.
 
 ## Validation
 

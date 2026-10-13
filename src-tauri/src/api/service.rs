@@ -22,8 +22,8 @@ use crate::persistence::{
     AppPaths, PersistenceStore, Revision, Settings, StoreError, StoreErrorKind,
 };
 use crate::providers::{
-    HomebrewProvider, MiseProvider, NpmGlobalProvider, PiExtensionsProvider, ProviderRegistry,
-    ProviderRegistryError, Recoverability,
+    GitHubReleasesProvider, HomebrewProvider, MiseProvider, NpmGlobalProvider,
+    PiExtensionsProvider, ProviderRegistry, ProviderRegistryError, Recoverability,
 };
 use crate::version::VersionValue;
 
@@ -141,6 +141,9 @@ impl ApiService {
             pi_path,
             npm_path,
             pi_agent_dir()?,
+        )))?;
+        registry.register(Arc::new(GitHubReleasesProvider::new(
+            store.paths().provider_configs_dir(),
         )))?;
         let catalog = load_catalog_with_built_ins(store.paths().manifests_dir());
         let event_sink = Arc::new(BufferedExecutionEventSink::new(
