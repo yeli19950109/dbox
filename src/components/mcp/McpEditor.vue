@@ -21,7 +21,7 @@
         </select></label
       >
     </div>
-    <p>配置仅用于应用连接。dbox 不会启动 MCP 进程。</p>
+    <p>配置仅用于应用连接。DBox 不会启动 MCP 进程。</p>
     <div v-if="draft.transport === 'stdio'" class="field-grid">
       <label
         >可执行文件<input

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "dbox",
+  "productName": "DBox",
   "version": "0.1.5",
   "identifier": "com.yel.dbox",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "dbox",
+        "title": "DBox",
         "width": 800,
         "height": 600
       }

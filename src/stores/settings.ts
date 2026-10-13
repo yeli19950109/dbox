@@ -27,7 +27,7 @@ export const useSettingsStore = defineStore("settings", () => {
       document.value = next;
       return next;
     } catch (reason) {
-      error.value = errorMessage(reason, "无法连接 dbox 后端并读取设置。");
+      error.value = errorMessage(reason, "无法连接 DBox 后端并读取设置。");
       throw reason;
     } finally {
       loading.value = false;

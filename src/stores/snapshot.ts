@@ -49,7 +49,7 @@ export const useSnapshotStore = defineStore("snapshot", () => {
       .catch((reason: unknown) => {
         error.value = errorMessage(
           reason,
-          "无法连接 dbox 后端。请从桌面应用启动后重试。",
+          "无法连接 DBox 后端。请从桌面应用启动后重试。",
         );
         throw reason;
       })

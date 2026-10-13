@@ -1,6 +1,6 @@
-# dbox
+# DBox
 
-dbox is a local manager for discovering, inspecting, and updating command-line tools.
+DBox is a local manager for discovering, inspecting, and updating command-line tools.
 
 Built-in providers: npm global, Homebrew, mise, Pi Extensions, and GitHub Releases. Command-line providers are discovered from PATH;
 an executable path override can be configured in Settings.

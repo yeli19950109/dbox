@@ -207,7 +207,7 @@
           <section class="extension-panel">
             <h2>从应用配置导入</h2>
             <p>
-              同名条目按应用和配置 key 分别保留。导入只保存 dbox
+              同名条目按应用和配置 key 分别保留。导入只保存 DBox
               记录，不改写应用配置。
             </p>
             <button class="button secondary" @click="store.scanImports">

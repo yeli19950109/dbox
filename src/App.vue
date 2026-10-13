@@ -1,10 +1,10 @@
 <template>
   <div class="app-shell">
     <header class="topbar">
-      <RouterLink class="brand" to="/tools" aria-label="dbox 工具主页">
+      <RouterLink class="brand" to="/tools" aria-label="DBox 工具主页">
         <span class="brand__mark" aria-hidden="true">d</span>
         <span>
-          <strong>dbox</strong>
+          <strong>DBox</strong>
           <small>tool control</small>
         </span>
       </RouterLink>

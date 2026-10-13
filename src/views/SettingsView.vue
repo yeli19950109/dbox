@@ -237,7 +237,7 @@ async function loadSettings(preserveDraft = false): Promise<void> {
     const document = await settings.load();
     if (!preserveDraft) draft.value = cloneSettings(document.settings);
   } catch (reason) {
-    loadError.value = errorMessage(reason, "无法连接 dbox 后端并读取设置。");
+    loadError.value = errorMessage(reason, "无法连接 DBox 后端并读取设置。");
   }
 }
 
