@@ -701,16 +701,25 @@ impl ApplicationService {
                             .ok_or_else(|| {
                                 ApplicationError::UnknownProvider(installation.provider_id.clone())
                             })?;
-                    let provider_plan = provider
-                        .plan_update(ProviderUpdateRequest {
-                            installation_id: installation_id.clone(),
-                            component_id: component.id.clone(),
-                            strategy_id: strategy.id.clone(),
-                            target_version: selection.target_version.clone(),
-                        })
+                    let actions = provider
+                        .plan_update_with_actions(
+                            ProviderUpdateRequest {
+                                installation_id: installation_id.clone(),
+                                component_id: component.id.clone(),
+                                strategy_id: strategy.id.clone(),
+                                target_version: selection.target_version.clone(),
+                            },
+                            crate::providers::ProviderActionContext {
+                                paths: self.store.paths(),
+                                settings: &settings.value,
+                            },
+                        )
                         .await?;
+                    let provider_plan = actions.plan;
                     let mut command = CommandSpec::new(provider_plan.program, provider_plan.args);
                     command.network_required = true;
+                    command.before = actions.before;
+                    command.after = actions.after;
                     command
                 }
                 StrategyKind::Command { program, args } => {
@@ -725,6 +734,9 @@ impl ApplicationService {
                 }
             };
             command.timeout_seconds = settings.value.default_timeout_seconds;
+            for action in command.before.iter_mut().chain(&mut command.after) {
+                action.command.timeout_seconds = settings.value.default_timeout_seconds;
+            }
             plans.push((tool, installation_id, component, strategy, command));
         }
         // Resolve every command before capturing revisions: resolving a later command
@@ -734,7 +746,7 @@ impl ApplicationService {
             .into_iter()
             .map(|(tool, installation_id, component, strategy, command)| {
                 let environment_revision =
-                    command_environment_revision(self.environment.as_ref(), &command.program);
+                    command_environment_revision(self.environment.as_ref(), &command);
                 let plan = UpdatePlan::new(
                     tool.id.clone(),
                     installation_id.clone(),
@@ -986,7 +998,7 @@ impl ApplicationService {
                 config_revision: settings.revision.as_str().into(),
                 environment_revision: command_environment_revision(
                     self.environment.as_ref(),
-                    &plan.command.program,
+                    &plan.command,
                 ),
                 version_snapshot: version_snapshot(&tool, &component),
                 now,
@@ -1047,31 +1059,25 @@ impl ApplicationService {
                 .status = ComponentStatus::Updating;
         }
 
-        let mut execution = match self
+        let started_at = Utc::now();
+        let (mut execution, execution_error) = match self
             .executor
             .execute(run_id.clone(), &confirmed, cancellation)
             .await
         {
-            Ok(execution) => execution,
-            Err(error) => {
-                let mut state = self.state.write().await;
-                find_component_mut(&mut state.snapshot.tools, &plan.tool_id, &plan.component_id)?
-                    .status = ComponentStatus::UpdateFailed {
-                    reason: StatusReason::new(
-                        "execution_error",
-                        error.summary.to_string(),
-                        error.retryable,
-                    ),
-                };
-                let saved = self.persist_tools(
-                    &state.snapshot.tools,
-                    state.snapshot.refreshed_at,
-                    None,
-                    None,
-                )?;
-                state.snapshot.state_revision = saved.as_str().into();
-                return Err(ApplicationError::Execution(error));
-            }
+            Ok(execution) => (execution, None),
+            Err(error) => (
+                ExecutionResult {
+                    run_id: run_id.clone(),
+                    status: RunStatus::Failed,
+                    exit_code: None,
+                    started_at,
+                    finished_at: Utc::now(),
+                    output_tail: error.summary.to_string(),
+                    verification: None,
+                },
+                Some(error),
+            ),
         };
 
         let (component_status, detected_version) = match execution.status {
@@ -1095,7 +1101,10 @@ impl ApplicationService {
                         ),
                     }
                 });
-                (ComponentStatus::UpdateSucceeded { verification }, None)
+                let (_, detected) = self
+                    .post_check(&plan.installation_id, previous_version.as_ref())
+                    .await;
+                (ComponentStatus::UpdateSucceeded { verification }, detected)
             }
             RunStatus::Cancelled => (ComponentStatus::Cancelled, None),
             RunStatus::Failed
@@ -1104,13 +1113,24 @@ impl ApplicationService {
             | RunStatus::Queued
             | RunStatus::Running => (
                 ComponentStatus::UpdateFailed {
-                    reason: StatusReason::new(
-                        "update_command_failed",
-                        format!("update finished with status {:?}", execution.status),
-                        matches!(
-                            execution.status,
-                            RunStatus::TimedOut | RunStatus::Interrupted
-                        ),
+                    reason: execution_error.as_ref().map_or_else(
+                        || {
+                            StatusReason::new(
+                                "update_command_failed",
+                                format!("update finished with status {:?}", execution.status),
+                                matches!(
+                                    execution.status,
+                                    RunStatus::TimedOut | RunStatus::Interrupted
+                                ),
+                            )
+                        },
+                        |error| {
+                            StatusReason::new(
+                                "execution_error",
+                                error.summary.to_string(),
+                                error.retryable,
+                            )
+                        },
                     ),
                 },
                 None,
@@ -1139,7 +1159,7 @@ impl ApplicationService {
                 exit_code: execution.exit_code,
                 output_tail: execution.output_tail.clone(),
                 verification: execution.verification.clone(),
-                error: None,
+                error: execution_error.as_ref().map(ToString::to_string),
             }),
         };
 
@@ -1161,6 +1181,9 @@ impl ApplicationService {
         )?;
         state.snapshot.state_revision = saved.as_str().into();
         let snapshot = state.snapshot.clone();
+        if let Some(error) = execution_error {
+            return Err(ApplicationError::Execution(error));
+        }
         Ok(ConfirmedUpdate {
             execution,
             snapshot,
@@ -1501,13 +1524,23 @@ fn version_snapshot(tool: &Tool, component: &crate::domain::Component) -> String
 
 fn command_environment_revision(
     environment: &dyn ApplicationEnvironment,
-    program: &Path,
+    command: &CommandSpec,
 ) -> String {
-    let material = (
-        environment.revision(),
-        program,
-        executable_fingerprint(program).unwrap_or_else(|_| "missing".into()),
-    );
+    fn fingerprints(command: &CommandSpec, paths: &mut Vec<(PathBuf, String)>) {
+        paths.push((
+            command.program.clone(),
+            executable_fingerprint(&command.program).unwrap_or_else(|_| "missing".into()),
+        ));
+        for action in command.before.iter().chain(&command.after) {
+            fingerprints(&action.command, paths);
+        }
+        if let Some(check) = &command.post_check {
+            fingerprints(check, paths);
+        }
+    }
+    let mut paths = Vec::new();
+    fingerprints(command, &mut paths);
+    let material = (environment.revision(), paths);
     blake3::hash(&serde_json::to_vec(&material).expect("command environment material serializes"))
         .to_hex()
         .to_string()

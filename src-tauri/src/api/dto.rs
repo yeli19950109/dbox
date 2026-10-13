@@ -652,6 +652,17 @@ pub struct CommandSpecDto {
     pub network_required: bool,
     pub post_check: Option<Box<CommandSpecDto>>,
     pub display_command: String,
+    #[serde(default)]
+    pub before: Vec<CommandActionDto>,
+    #[serde(default)]
+    pub after: Vec<CommandActionDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandActionDto {
+    pub label: String,
+    pub command: CommandSpecDto,
 }
 
 impl From<&CommandSpecView> for CommandSpecDto {
@@ -677,6 +688,22 @@ impl From<&CommandSpecView> for CommandSpecDto {
                 .map(CommandSpecDto::from)
                 .map(Box::new),
             display_command: command.display_command.clone(),
+            before: command
+                .before
+                .iter()
+                .map(|action| CommandActionDto {
+                    label: action.label.clone(),
+                    command: CommandSpecDto::from(&action.command),
+                })
+                .collect(),
+            after: command
+                .after
+                .iter()
+                .map(|action| CommandActionDto {
+                    label: action.label.clone(),
+                    command: CommandSpecDto::from(&action.command),
+                })
+                .collect(),
         }
     }
 }
@@ -921,6 +948,8 @@ pub struct SettingsValueDto {
     pub log_retention: LogRetentionDto,
     pub executable_overrides: BTreeMap<String, String>,
     pub component_strategies: BTreeMap<String, BTreeMap<String, String>>,
+    #[serde(default)]
+    pub npm_allow_scripts: BTreeMap<String, Vec<String>>,
 }
 
 impl From<&Settings> for SettingsValueDto {
@@ -932,6 +961,7 @@ impl From<&Settings> for SettingsValueDto {
                 .map(|(id, enabled)| (id.to_string(), *enabled))
                 .collect(),
             default_timeout_seconds: settings.default_timeout_seconds.to_string(),
+            npm_allow_scripts: settings.npm_allow_scripts.clone(),
             log_retention: LogRetentionDto {
                 max_files: to_u32(settings.log_retention.max_files),
                 max_total_bytes: settings.log_retention.max_total_bytes.to_string(),

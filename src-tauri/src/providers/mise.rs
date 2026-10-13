@@ -20,12 +20,13 @@ use crate::domain::{
     ComponentId, Installation, InstallationId, InstallationScope, PackageCoordinate, PackageKind,
     ProviderId,
 };
+use crate::executor::{CommandAction, CommandSpec, EnvironmentValue};
 use crate::version::{ComponentStatus, StatusReason, VersionValue};
 
 use super::{
-    ProviderCapabilities, ProviderError, ProviderOperation, ProviderProgress,
-    ProviderProgressCallback, ProviderStatus, ProviderUpdatePlan, ProviderUpdateRequest,
-    Recoverability, ToolProvider, UpdateCheck,
+    ProviderActionContext, ProviderCapabilities, ProviderError, ProviderOperation,
+    ProviderProgress, ProviderProgressCallback, ProviderStatus, ProviderUpdateActions,
+    ProviderUpdatePlan, ProviderUpdateRequest, Recoverability, ToolProvider, UpdateCheck,
 };
 
 pub const MISE_PROVIDER_ID: &str = "mise";
@@ -344,6 +345,90 @@ impl MiseProvider {
 
 #[async_trait]
 impl ToolProvider for MiseProvider {
+    async fn plan_update_with_actions(
+        &self,
+        request: ProviderUpdateRequest,
+        context: ProviderActionContext<'_>,
+    ) -> Result<ProviderUpdateActions, ProviderError> {
+        let plan = self.plan_update(request).await?;
+        let entry = self.entries.lock().expect("mise entries mutex")[&plan.installation_id].clone();
+        let mut actions = ProviderUpdateActions::from(plan);
+        if entry.installation.package.name != "core:node"
+            || entry.installation.scope != InstallationScope::Global
+        {
+            return Ok(actions);
+        }
+        let manifest = context
+            .paths
+            .data_dir
+            .join("node-migrations")
+            .join(format!("{}.json", uuid::Uuid::new_v4()));
+        let prefix = entry
+            .installation
+            .install_path
+            .as_ref()
+            .expect("mise scan validates install path");
+        let script = include_str!("node_migration.cjs");
+        let policies = serde_json::to_string(&context.settings.npm_allow_scripts)
+            .expect("script policies serialize");
+        let action = |mode: &str, version: &str, label: &str| {
+            let spec = format!("core:node@{version}");
+            let mut command = CommandSpec::new(
+                &self.mise_path,
+                self.args(&[
+                    "exec",
+                    &spec,
+                    "--",
+                    "node",
+                    "-e",
+                    script,
+                    "--",
+                    mode,
+                    &manifest.to_string_lossy(),
+                    &prefix.to_string_lossy(),
+                    &policies,
+                ]),
+            );
+            command.network_required = mode == "restore";
+            command
+                .env
+                .insert("MISE_AUTO_INSTALL".into(), EnvironmentValue::plain("false"));
+            CommandAction {
+                label: label.into(),
+                command,
+            }
+        };
+        actions.before.push(action(
+            "snapshot",
+            entry.installation.installed_version.as_ref().unwrap().raw(),
+            "保存全局 npm 包清单与安装脚本授权",
+        ));
+        actions.after.push(action(
+            "restore",
+            entry.requested_version.as_deref().unwrap(),
+            "在新 Node 环境中恢复全局 npm 包（最新版）",
+        ));
+        Ok(actions)
+    }
+
+    async fn validate_update_plan(&self, plan: &ProviderUpdatePlan) -> Result<(), ProviderError> {
+        let current = self
+            .plan_update(ProviderUpdateRequest {
+                installation_id: plan.installation_id.clone(),
+                component_id: plan.component_id.clone(),
+                strategy_id: plan.strategy_id.clone(),
+                target_version: None,
+            })
+            .await?;
+        if current != *plan {
+            return Err(self.error(
+                ProviderOperation::PlanUpdate,
+                Recoverability::RequiresConfiguration,
+                "mise update plan changed; preview again",
+            ));
+        }
+        Ok(())
+    }
     fn id(&self) -> ProviderId {
         self.id.clone()
     }

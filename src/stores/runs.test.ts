@@ -101,6 +101,21 @@ describe("runs store", () => {
     expect(store.pendingSelections).toHaveLength(1);
   });
 
+  it("explains unavailable execution separately from expired confirmation", async () => {
+    const plan = updatePlan();
+    const mock = createMockTransport({
+      preview: vi.fn(() => ok([plan])),
+      confirmBatch: vi.fn(() => ok({ outcomes: [{ status: "error" as const, planId: plan.planId, error: { code: "invalid_plan" as const, message: "program missing", retryable: true, details: { reason: "execution_unavailable" } } }], snapshot: snapshotWithTools() })),
+    });
+    setTransportForTests(mock.transport);
+    const store = useRunsStore();
+    await store.preview([{ toolId: plan.toolId, componentId: plan.componentId, strategyId: null, targetVersion: null }]);
+    await store.confirmPlans();
+    expect(store.error).toContain("执行程序或工作目录已不可用");
+    expect(store.error).not.toContain("计划已过期");
+    expect(store.needsRepreview).toBe(true);
+  });
+
   it("supports partial failure history, cancellation and retry through backend APIs", async () => {
     const run = failedRun();
     const plan = updatePlan();

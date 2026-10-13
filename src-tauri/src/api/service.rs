@@ -768,12 +768,26 @@ fn settings_from_dto(value: SettingsValueDto) -> Result<Settings, ApiErrorDto> {
             Ok((tool_id, components))
         })
         .collect::<Result<_, ApiErrorDto>>()?;
+    let script_entry =
+        regex::Regex::new(r"^(?:@[A-Za-z0-9_.-]+/)?[A-Za-z0-9][A-Za-z0-9_.-]*(?:@[^,\s]+)?$")
+            .expect("valid npm script entry regex");
+    for (package, entries) in &value.npm_allow_scripts {
+        if !script_entry.is_match(package)
+            || entries.iter().any(|entry| !script_entry.is_match(entry))
+        {
+            return Err(invalid_field(
+                "npmAllowScripts",
+                "全局 CLI 和 allow-scripts 必须是 npm 包名或带版本的包名",
+            ));
+        }
+    }
     Ok(Settings {
         provider_enabled,
         default_timeout_seconds: timeout,
         log_retention: value.log_retention.to_domain()?,
         executable_overrides,
         component_strategies,
+        npm_allow_scripts: value.npm_allow_scripts,
     })
 }
 
@@ -816,15 +830,14 @@ fn application_error(error: ApplicationError) -> ApiErrorDto {
             error.recoverability == Recoverability::Retryable,
         ),
         ApplicationError::Registry(error) => registry_error(error),
-        ApplicationError::Execution(error) => ApiErrorDto::new(
+        ApplicationError::Execution(error) => {
             if matches!(error.kind, ExecutionErrorKind::InvalidPlan) {
-                ApiErrorCode::InvalidPlan
+                ApiErrorDto::new(ApiErrorCode::InvalidPlan, error.to_string(), true)
+                    .with_detail("reason", "execution_unavailable")
             } else {
-                ApiErrorCode::Internal
-            },
-            error.to_string(),
-            error.retryable,
-        ),
+                ApiErrorDto::new(ApiErrorCode::Internal, error.to_string(), error.retryable)
+            }
+        }
         ApplicationError::DuplicateSelection { .. }
         | ApplicationError::NoDefaultStrategy { .. }
         | ApplicationError::ToolHasNoInstallation(_) => {

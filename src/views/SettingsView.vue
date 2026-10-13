@@ -41,6 +41,19 @@
 
       <section class="settings-card">
         <header>
+          <div><p class="eyebrow">npm scripts</p><h2>全局 CLI 安装脚本授权</h2></div>
+          <p>按 CLI 保存 allow-scripts，更新和 Node 迁移时自动沿用。npm 配置中的授权也会保留；历史命令里的一次性授权需要在此补录。</p>
+        </header>
+        <div v-for="(policy, index) in scriptPolicies" :key="index" class="field-grid">
+          <label><span>全局 CLI 包名</span><input v-model="policy.packageName" placeholder="@deepseek-ai/dsh" /></label>
+          <label><span>允许运行脚本的包（逗号分隔）</span><input v-model="policy.allowScripts" placeholder="koffi,node-pty,protobufjs" /></label>
+          <button class="text-button" type="button" @click="scriptPolicies.splice(index, 1)">移除授权记录</button>
+        </div>
+        <button class="text-button" type="button" @click="scriptPolicies.push({ packageName: '', allowScripts: '' })">添加 CLI 授权</button>
+      </section>
+
+      <section class="settings-card">
+        <header>
           <div>
             <p class="eyebrow">Providers</p>
             <h2>扫描来源</h2>
@@ -188,6 +201,7 @@ const settings = useSettingsStore();
 const snapshots = useSnapshotStore();
 const notifications = useNotificationsStore();
 const draft = ref<SettingsValueDto | null>(null);
+const scriptPolicies = ref<Array<{ packageName: string; allowScripts: string }>>([]);
 const loadError = ref<string | null>(null);
 const settingsConflict = ref(false);
 const manifestFile = ref("custom.toml");
@@ -213,6 +227,7 @@ const strategyComponents = computed(() =>
 
 function cloneSettings(value: SettingsValueDto): SettingsValueDto {
   const copy = structuredClone(toRaw(value));
+  scriptPolicies.value = Object.entries(copy.npmAllowScripts ?? {}).map(([packageName, entries]) => ({ packageName, allowScripts: entries.join(',') }));
   copy.executableOverrides.PATH ??= "";
   copy.executableOverrides.npm ??= "";
   copy.executableOverrides.brew ??= "";
@@ -223,6 +238,7 @@ function cloneSettings(value: SettingsValueDto): SettingsValueDto {
 
 function settingsForSave(value: SettingsValueDto): SettingsValueDto {
   const copy = structuredClone(toRaw(value));
+  copy.npmAllowScripts = Object.fromEntries(scriptPolicies.value.filter(row => row.packageName.trim() || row.allowScripts.trim()).map(row => [row.packageName.trim(), [...new Set(row.allowScripts.split(',').map(value => value.trim()).filter(Boolean))]]));
   copy.executableOverrides = Object.fromEntries(
     Object.entries(copy.executableOverrides)
       .map(([name, path]) => [name, path.trim()] as const)

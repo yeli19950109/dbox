@@ -19,6 +19,10 @@ case "$1" in
   root)
     printf '%s\n' "$fixture_dir/prefix/lib/node_modules"
     ;;
+  config)
+    [ "$2" = 'get' ] && [ "$3" = 'allow-scripts' ] || exit 91
+    printf '"protobufjs,koffi"\n'
+    ;;
   ls)
     if [ -f "$fixture_dir/list.json" ]; then
       command cat "$fixture_dir/list.json"

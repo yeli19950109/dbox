@@ -42,6 +42,8 @@ case "$1" in
     if [ "$2" = '--help' ]; then
       if [ -f "$base/old-version" ]; then printf 'upgrade\n'; else printf 'upgrade --no-prune\n'; fi
     else
+      printf 'upgrade\n' >> "$base/lifecycle.log"
+      if [ -f "$base/upgrade.fail" ]; then exit 43; fi
       [ "$2" = '--no-prune' ] && [ "$3" = '--yes' ] && [ "$4" = '--' ]
       [ "$#" = 5 ]
       if [ -f "$base/after-installed.json" ]; then
@@ -50,6 +52,12 @@ case "$1" in
         cp "$base/after-global.json" "$base/current.json"
       fi
     fi
+    ;;
+  exec)
+    [ "$3" = '--' ] && [ "$4" = 'node' ] && [ "$5" = '-e' ] && [ "$7" = '--' ]
+    printf '%s\n' "$8" >> "$base/lifecycle.log"
+    if [ -f "$base/$8.fail" ]; then exit 44; fi
+    printf '%s completed\n' "$8"
     ;;
   *) exit 64 ;;
 esac

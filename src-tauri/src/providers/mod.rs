@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::domain::{ComponentId, Installation, InstallationId, ProviderId, StrategyId};
+use crate::executor::CommandAction;
+use crate::persistence::{AppPaths, Settings};
 use crate::version::{ComponentStatus, VersionValue};
 
 pub mod github_releases;
@@ -174,6 +176,27 @@ pub struct ProviderUpdatePlan {
     pub args: Vec<String>,
 }
 
+pub struct ProviderActionContext<'a> {
+    pub paths: &'a AppPaths,
+    pub settings: &'a Settings,
+}
+
+pub struct ProviderUpdateActions {
+    pub plan: ProviderUpdatePlan,
+    pub before: Vec<CommandAction>,
+    pub after: Vec<CommandAction>,
+}
+
+impl From<ProviderUpdatePlan> for ProviderUpdateActions {
+    fn from(plan: ProviderUpdatePlan) -> Self {
+        Self {
+            plan,
+            before: Vec::new(),
+            after: Vec::new(),
+        }
+    }
+}
+
 /// Progress within one provider operation. Counts describe completed work, including
 /// failed checks, and are only set once the operation knows its inventory size.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -243,6 +266,17 @@ pub trait ToolProvider: Send + Sync {
         &self,
         request: ProviderUpdateRequest,
     ) -> Result<ProviderUpdatePlan, ProviderError>;
+
+    /// Declare lifecycle actions as part of the reviewed, hashed plan. The common
+    /// executor runs them with the same logging, timeout and cancellation rules.
+    /// A failed before action prevents the update; a failed after action is partial.
+    async fn plan_update_with_actions(
+        &self,
+        request: ProviderUpdateRequest,
+        _context: ProviderActionContext<'_>,
+    ) -> Result<ProviderUpdateActions, ProviderError> {
+        self.plan_update(request).await.map(Into::into)
+    }
 
     /// Revalidate external provider configuration immediately before executing a
     /// previously reviewed plan. Providers without external mutable state retain

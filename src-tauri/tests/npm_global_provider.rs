@@ -167,6 +167,54 @@ async fn refresh_progress_preserves_batch_queries_and_reports_cached_completion(
 }
 
 #[tokio::test]
+async fn saved_cli_script_policy_is_combined_with_npm_config_in_the_plan() {
+    use dbox_lib::persistence::{AppPaths, Settings};
+    use dbox_lib::providers::ProviderActionContext;
+    let fake = FakeNpm::new();
+    fake.write_list(json!({"@deepseek-ai/dsh": {"version": "1.0.0"}}));
+    fake.package("@deepseek-ai/dsh", json!({"version": "1.0.0"}));
+    let provider = fake.provider();
+    let installed = provider.scan().await.unwrap().remove(0);
+    let mut settings = Settings::default();
+    settings.npm_allow_scripts.insert(
+        "@deepseek-ai/dsh".into(),
+        vec!["node-pty".into(), "koffi".into()],
+    );
+    let paths = AppPaths::new(
+        fake.temporary.path().join("config"),
+        fake.temporary.path().join("data"),
+        fake.temporary.path().join("logs"),
+    );
+    let actions = provider
+        .plan_update_with_actions(
+            ProviderUpdateRequest {
+                installation_id: installed.id,
+                component_id: ComponentId::new("core").unwrap(),
+                strategy_id: StrategyId::new("provider-default").unwrap(),
+                target_version: None,
+            },
+            ProviderActionContext {
+                paths: &paths,
+                settings: &settings,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(actions
+        .plan
+        .args
+        .contains(&"--allow-scripts=koffi,node-pty,protobufjs".into()));
+    let separator = actions
+        .plan
+        .args
+        .iter()
+        .position(|arg| arg == "--")
+        .unwrap();
+    assert!(actions.plan.args[..separator].contains(&"--strict-allow-scripts".into()));
+    assert_eq!(actions.plan.args[separator + 1], "@deepseek-ai/dsh@latest");
+}
+
+#[tokio::test]
 async fn fake_npm_completes_probe_scan_check_and_single_package_plan() {
     let fake = FakeNpm::new();
     fake.write_list(json!({

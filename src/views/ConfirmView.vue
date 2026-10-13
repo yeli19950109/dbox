@@ -59,6 +59,12 @@
             </li>
           </ol>
         </div>
+        <div v-for="phase in [{ name: '更新前', actions: plan.command.before }, { name: '更新后', actions: plan.command.after }]" :key="phase.name">
+          <details v-for="(action, index) in phase.actions" :key="index">
+            <summary>{{ phase.name }}：{{ action.label }}</summary>
+            <pre class="command-preview">{{ action.command.displayCommand }}</pre>
+          </details>
+        </div>
         <footer>
           <span>计划有效至 {{ formatDate(plan.expiresAt) }}</span>
           <span v-if="plan.command.postCheck">完成后将重新检查版本</span>

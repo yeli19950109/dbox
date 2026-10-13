@@ -10,6 +10,17 @@ import SettingsView from "./SettingsView.vue";
 describe("SettingsView revision conflicts", () => {
   beforeEach(() => setActivePinia(createPinia()));
 
+  it("saves per-CLI script approvals without changing npm user configuration", async () => {
+    const mock = createMockTransport(); setTransportForTests(mock.transport);
+    const wrapper = mount(SettingsView); await flushPromises();
+    await wrapper.findAll("button").find(button => button.text() === "添加 CLI 授权")!.trigger("click");
+    await wrapper.get('input[placeholder="@deepseek-ai/dsh"]').setValue("@deepseek-ai/dsh");
+    await wrapper.get('input[placeholder="koffi,node-pty,protobufjs"]').setValue("koffi, node-pty, koffi");
+    await wrapper.get('[data-testid="settings-save"]').trigger("click"); await flushPromises();
+    expect(mock.transport.commands.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ settings: expect.objectContaining({ npmAllowScripts: { "@deepseek-ai/dsh": ["koffi", "node-pty"] } }) }));
+    wrapper.unmount();
+  });
+
   it("shows unscanned mise as enabled by default and exposes its executable override", async () => {
     const mock = createMockTransport();
     setTransportForTests(mock.transport);

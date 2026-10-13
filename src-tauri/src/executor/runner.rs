@@ -136,93 +136,29 @@ impl CommandExecutor {
         tracing::debug!(run_id = %run_id, plan_id = %confirmed.plan().plan_id, "executing confirmed plan");
 
         let redactor = Redactor::new(confirmed.command());
-        let main = run_command(
+        let (status, exit_code, output_tail, verification) = match execute_sequence(
             confirmed.command(),
             &cancellation,
             &redactor,
             &mut session,
             self.max_tail_bytes,
         )
-        .await?;
-
-        let (status, exit_code, output_tail, verification) = match main {
-            RawOutcome::Cancelled { tail } => (RunStatus::Cancelled, None, tail, None),
-            RawOutcome::TimedOut { tail } => (RunStatus::TimedOut, None, tail, None),
-            RawOutcome::Exited { code, tail } => {
-                if !confirmed.command().success_exit_codes.contains(&code) {
-                    (RunStatus::Failed, Some(code), tail, None)
-                } else if let Some(post_check) = &confirmed.command().post_check {
-                    session.emit(RunEventKind::Output {
-                        stream: OutputStream::System,
-                        message: "running post-check".into(),
-                    })?;
-                    match run_command(
-                        post_check,
-                        &cancellation,
-                        &redactor,
-                        &mut session,
-                        self.max_tail_bytes,
-                    )
-                    .await
-                    {
-                        Ok(RawOutcome::Exited {
-                            code: check_code,
-                            tail: check_tail,
-                        }) if post_check.success_exit_codes.contains(&check_code) => (
-                            RunStatus::Succeeded,
-                            Some(code),
-                            combine_tails(&tail, &check_tail, self.max_tail_bytes),
-                            Some(VerificationStatus::Verified),
-                        ),
-                        Ok(RawOutcome::Cancelled { tail: check_tail }) => (
-                            RunStatus::Cancelled,
-                            Some(code),
-                            combine_tails(&tail, &check_tail, self.max_tail_bytes),
-                            None,
-                        ),
-                        Ok(RawOutcome::TimedOut { tail: check_tail }) => (
-                            RunStatus::Partial,
-                            Some(code),
-                            combine_tails(&tail, &check_tail, self.max_tail_bytes),
-                            Some(VerificationStatus::VerificationFailed {
-                                reason: StatusReason::new(
-                                    "post_check_timed_out",
-                                    "The update command succeeded but its post-check timed out",
-                                    true,
-                                ),
-                            }),
-                        ),
-                        Ok(RawOutcome::Exited {
-                            code: check_code,
-                            tail: check_tail,
-                        }) => (
-                            RunStatus::Partial,
-                            Some(code),
-                            combine_tails(&tail, &check_tail, self.max_tail_bytes),
-                            Some(VerificationStatus::VerificationFailed {
-                                reason: StatusReason::new(
-                                    "post_check_failed",
-                                    format!("Post-check exited with code {check_code}"),
-                                    true,
-                                ),
-                            }),
-                        ),
-                        Err(error) => (
-                            RunStatus::Partial,
-                            Some(code),
-                            tail,
-                            Some(VerificationStatus::VerificationFailed {
-                                reason: StatusReason::new(
-                                    "post_check_error",
-                                    error.summary.to_string(),
-                                    error.retryable,
-                                ),
-                            }),
-                        ),
-                    }
-                } else {
-                    (RunStatus::Succeeded, Some(code), tail, None)
-                }
+        .await
+        {
+            Ok(outcome) => outcome,
+            Err(mut error) => {
+                error.summary = redactor.redact(&error.summary).into();
+                // A failed launch must not leave subscribers showing Running.
+                // Try each event even when logging or the event sink itself failed.
+                let _ = session.emit(RunEventKind::Output {
+                    stream: OutputStream::System,
+                    message: format!("执行失败：{}\n", error.summary),
+                });
+                let _ = session.emit(RunEventKind::Exit { code: None });
+                let _ = session.emit(RunEventKind::StateChanged {
+                    status: RunStatus::Failed,
+                });
+                return Err(error);
             }
         };
 
@@ -238,6 +174,116 @@ impl CommandExecutor {
             verification,
         })
     }
+}
+
+type SequenceOutcome = (RunStatus, Option<i32>, String, Option<VerificationStatus>);
+
+async fn execute_sequence(
+    command: &CommandSpec,
+    cancellation: &CancellationToken,
+    redactor: &Redactor,
+    session: &mut ExecutionSession,
+    max_tail_bytes: usize,
+) -> Result<SequenceOutcome, ExecutionError> {
+    let mut steps: Vec<_> = command
+        .before
+        .iter()
+        .map(|action| ("before_update", action.label.as_str(), &action.command))
+        .collect();
+    steps.push(("update", "", command));
+    steps.extend(
+        command
+            .after
+            .iter()
+            .map(|action| ("after_update", action.label.as_str(), &action.command)),
+    );
+    if let Some(check) = &command.post_check {
+        steps.push(("post_check", "running post-check", check));
+    }
+    let mut tail = String::new();
+    let mut main_exit = None;
+    for (phase, label, spec) in steps {
+        if !label.is_empty() {
+            session.emit(RunEventKind::Output {
+                stream: OutputStream::System,
+                message: redactor.redact(&format!("{label}\n")),
+            })?;
+        }
+        let outcome = run_command(
+            spec,
+            cancellation,
+            redactor,
+            session,
+            max_tail_bytes,
+            phase == "update" || phase == "post_check",
+        )
+        .await;
+        let (status, exit, message, retryable) = match outcome {
+            Ok(RawOutcome::Exited { code, tail: output }) => {
+                tail = combine_tails(&tail, &output, max_tail_bytes);
+                if spec.success_exit_codes.contains(&code) {
+                    if phase == "update" {
+                        main_exit = Some(code);
+                    }
+                    continue;
+                }
+                (
+                    RunStatus::Failed,
+                    Some(code),
+                    format!("{label} exited with code {code}"),
+                    true,
+                )
+            }
+            Ok(RawOutcome::Cancelled { tail: output }) => {
+                tail = combine_tails(&tail, &output, max_tail_bytes);
+                (
+                    RunStatus::Cancelled,
+                    None,
+                    format!("{label} was cancelled"),
+                    true,
+                )
+            }
+            Ok(RawOutcome::TimedOut { tail: output }) => {
+                tail = combine_tails(&tail, &output, max_tail_bytes);
+                (
+                    RunStatus::TimedOut,
+                    None,
+                    format!("{label} timed out"),
+                    true,
+                )
+            }
+            Err(error) if main_exit.is_some() => {
+                let message = redactor.redact(&error.summary);
+                session.emit(RunEventKind::Output {
+                    stream: OutputStream::System,
+                    message: format!("{label}：{message}\n"),
+                })?;
+                tail = combine_tails(&tail, &message, max_tail_bytes);
+                (RunStatus::Failed, None, message, error.retryable)
+            }
+            Err(error) => return Err(error),
+        };
+        if main_exit.is_some() {
+            return Ok((
+                RunStatus::Partial,
+                main_exit,
+                tail,
+                Some(VerificationStatus::VerificationFailed {
+                    reason: StatusReason::new(format!("{phase}_failed"), message, retryable),
+                }),
+            ));
+        }
+        return Ok((status, exit, tail, None));
+    }
+    Ok((
+        RunStatus::Succeeded,
+        main_exit,
+        tail,
+        command
+            .post_check
+            .as_ref()
+            .map(|_| VerificationStatus::Verified),
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -381,12 +427,13 @@ async fn run_command(
     redactor: &Redactor,
     session: &mut ExecutionSession,
     max_tail_bytes: usize,
+    show_command: bool,
 ) -> Result<RawOutcome, ExecutionError> {
     spec.validate().map_err(|error| {
         ExecutionError::new(
             &session.run_id,
             ExecutionErrorKind::InvalidPlan,
-            error.to_string(),
+            format!("{error} ({})", spec.program.display()),
             false,
         )
     })?;
@@ -401,10 +448,12 @@ async fn run_command(
             .map(|argument| redactor.redact(argument))
             .collect(),
     );
-    session.emit(RunEventKind::Output {
-        stream: OutputStream::System,
-        message: redactor.redact(&format!("执行命令：{}\n", display.display_command())),
-    })?;
+    if show_command {
+        session.emit(RunEventKind::Output {
+            stream: OutputStream::System,
+            message: redactor.redact(&format!("执行命令：{}\n", display.display_command())),
+        })?;
+    }
 
     let mut command = tokio::process::Command::new(&spec.program);
     command
@@ -677,6 +726,9 @@ impl Redactor {
                     .filter(|value| value.is_sensitive() && !value.expose().is_empty())
                     .map(|value| value.expose().to_owned()),
             );
+        }
+        for action in command.before.iter().chain(&command.after) {
+            secret_values.extend(Self::new(&action.command).secret_values);
         }
         secret_values.sort_by_key(|value| std::cmp::Reverse(value.len()));
         secret_values.dedup();
@@ -981,6 +1033,133 @@ mod tests {
             result.verification,
             Some(VerificationStatus::VerificationFailed { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn lifecycle_actions_run_in_order_and_redact_their_secrets() {
+        use crate::executor::CommandAction;
+        let temporary = TempDir::new().unwrap();
+        let program = fixture(&temporary);
+        let mut command = CommandSpec::new(&program, vec!["args".into(), "main-marker".into()]);
+        command.before.push(CommandAction {
+            label: "snapshot".into(),
+            command: CommandSpec::new(&program, vec!["args".into(), "before-marker".into()]),
+        });
+        let mut restore = CommandSpec::new(&program, vec!["secret".into()]);
+        restore
+            .env
+            .insert("TOKEN".into(), EnvironmentValue::secret("migration-secret"));
+        command.after.push(CommandAction {
+            label: "restore".into(),
+            command: restore,
+        });
+        let result = executor(&temporary, Arc::new(NoopEventSink), 4096)
+            .execute(run_id(), &confirmed(command), CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(result.status, RunStatus::Succeeded);
+        assert!(
+            result.output_tail.find("before-marker").unwrap()
+                < result.output_tail.find("main-marker").unwrap()
+        );
+        assert!(
+            result.output_tail.find("main-marker").unwrap()
+                < result.output_tail.find("[REDACTED]").unwrap()
+        );
+        assert!(!result.output_tail.contains("migration-secret"));
+    }
+
+    #[tokio::test]
+    async fn lifecycle_failures_stop_the_correct_stages() {
+        use crate::executor::CommandAction;
+        for before_fails in [true, false] {
+            let temporary = TempDir::new().unwrap();
+            let program = fixture(&temporary);
+            let mut command = CommandSpec::new(&program, vec!["args".into(), "main-marker".into()]);
+            command.before.push(CommandAction {
+                label: "snapshot".into(),
+                command: CommandSpec::new(
+                    &program,
+                    vec![if before_fails { "fail" } else { "streams" }.into()],
+                ),
+            });
+            command.after.push(CommandAction {
+                label: "restore".into(),
+                command: CommandSpec::new(&program, vec!["fail".into()]),
+            });
+            command.after.push(CommandAction {
+                label: "must not run".into(),
+                command: CommandSpec::new(&program, vec!["args".into(), "skipped-marker".into()]),
+            });
+            let result = executor(&temporary, Arc::new(NoopEventSink), 4096)
+                .execute(run_id(), &confirmed(command), CancellationToken::new())
+                .await
+                .unwrap();
+            assert_eq!(
+                result.status,
+                if before_fails {
+                    RunStatus::Failed
+                } else {
+                    RunStatus::Partial
+                }
+            );
+            assert_eq!(result.output_tail.contains("main-marker"), !before_fails);
+            assert!(!result.output_tail.contains("skipped-marker"));
+            if !before_fails {
+                assert!(
+                    matches!(result.verification, Some(VerificationStatus::VerificationFailed { reason }) if reason.code == "after_update_failed")
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unavailable_command_emits_failure_instead_of_leaving_a_running_run() {
+        let temporary = TempDir::new().unwrap();
+        let program = fixture(&temporary);
+        let plan = confirmed(CommandSpec::new(&program, vec!["streams".into()]));
+        std::fs::remove_file(program).unwrap();
+        let sink = Arc::new(MemoryEventSink::default());
+        let error = executor(&temporary, sink.clone(), 4096)
+            .execute(run_id(), &plan, CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, ExecutionErrorKind::InvalidPlan);
+        let events = sink.events();
+        assert!(events.iter().any(|event| matches!(&event.event, RunEventKind::Output { message, .. } if message.contains("执行失败"))));
+        assert!(matches!(
+            events.last().unwrap().event,
+            RunEventKind::StateChanged {
+                status: RunStatus::Failed
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_a_before_action_does_not_start_the_update() {
+        use crate::executor::CommandAction;
+        let temporary = TempDir::new().unwrap();
+        let program = fixture(&temporary);
+        let mut command =
+            CommandSpec::new(&program, vec!["args".into(), "main-must-not-run".into()]);
+        command.before.push(CommandAction {
+            label: "snapshot".into(),
+            command: CommandSpec::new(
+                &program,
+                vec![
+                    "quiet-gated".into(),
+                    temporary.path().join("never-created").display().to_string(),
+                ],
+            ),
+        });
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let result = executor(&temporary, Arc::new(NoopEventSink), 4096)
+            .execute(run_id(), &confirmed(command), cancel)
+            .await
+            .unwrap();
+        assert_eq!(result.status, RunStatus::Cancelled);
+        assert!(!result.output_tail.contains("main-must-not-run"));
     }
 
     async fn wait_for_pid_files(prefix: &Path) -> (i32, i32) {

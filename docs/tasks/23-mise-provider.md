@@ -47,3 +47,19 @@ CLI 语义参考：[ls](https://mise.jdx.dev/cli/ls.html)、[tool](https://mise.
 - `cargo fmt --manifest-path src-tauri/Cargo.toml --check`、`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --features dev-http -- -D warnings`、`npm test`（38 项）、`npm run build` 通过。
 - 本机 mise 2026.9.1 只读扫描识别 22 个安装版本、7 个全局启用项，7 项更新计划预览成功；未执行真实工具更新。真实远端版本查询受当前网络/缓存写入权限限制，失败状态正确返回。
 - 已知限制：未全局启用的版本、链接安装、`path:`/`ref:` 等特殊请求仅展示；暂不支持自定义目标版本、跨版本范围升级、项目配置管理及 executable 枚举。缺少 `upgrade --no-prune` 的 mise 可扫描，更新保持只读。不同非 SemVer 版本不猜测更新顺序。
+
+## 全局 Node 与 npm 包迁移（2026-10-13）
+
+Provider 可以通过 `plan_update_with_actions` 声明更新前、更新后动作，默认适配原有 `plan_update`。动作使用 `CommandAction { label, command }`，与主命令一起参与预览、hash 和环境指纹校验，并共用执行器的日志、取消、超时、脱敏与历史记录。更新前失败会阻止主命令；主命令失败不会执行更新后动作；更新后失败显示部分成功，仍重新检测实际安装版本。
+
+全局 `core:node` 使用此机制：
+
+1. 在旧 Node 的明确版本中执行只读 npm 清单查询，保存包名、旧版本、链接来源、`allow-scripts` 和 `ignore-scripts`。
+2. 执行原有 `mise upgrade --no-prune`。
+3. 使用 `mise exec` 进入升级后的 Node，在该运行时的安装前缀中逐包安装 `包名@latest`。本地链接包保留本地来源，不替换为注册表中的同名包。npm、Corepack 优先恢复；恢复 pnpm/yarn 时仅替换确认属于 Corepack 的符号链接，安装失败会恢复原链接，不使用 `--force`。
+
+迁移清单保存在应用数据目录的 `node-migrations/<id>.json`，包含逐包结果，失败时保留供诊断。读取清单失败会阻止 Node 升级。恢复包失败不会阻止尝试其他包，但整个 Node 更新会显示部分成功。测试使用隔离运行时与模拟 npm，不修改本机全局包。
+
+设置页的“全局 CLI 安装脚本授权”按顶层包保存 `npmAllowScripts`；普通 npm 更新和迁移都会将其与 npm 配置中的有效列表合并，不修改用户 `.npmrc`，也不启用全部脚本。迁移沿用 `ignore-scripts`，否则开启 `strict-allow-scripts`，避免脚本被阻止后仍误报完整恢复。npm 不会将历史全局安装命令中一次性的 `--allow-scripts` 写入项目清单，因此这类授权需要用户补录，不能从依赖包自身的 scripts 字段推断授权。
+
+参考：[mise exec](https://mise.jdx.dev/cli/exec)、[npm 全局脚本授权](https://github.com/npm/cli/blob/latest/docs/lib/content/commands/npm-install-scripts.md)、[npm allow-scripts 配置](https://docs.npmjs.com/using-npm/config/#allow-scripts)。

@@ -18,9 +18,9 @@ use crate::domain::{
 use crate::version::{ComponentStatus, StatusReason, VersionValue};
 
 use super::{
-    ProviderCapabilities, ProviderError, ProviderOperation, ProviderProgress,
-    ProviderProgressCallback, ProviderStatus, ProviderUpdatePlan, ProviderUpdateRequest,
-    Recoverability, ToolProvider, UpdateCheck,
+    ProviderActionContext, ProviderCapabilities, ProviderError, ProviderOperation,
+    ProviderProgress, ProviderProgressCallback, ProviderStatus, ProviderUpdateActions,
+    ProviderUpdatePlan, ProviderUpdateRequest, Recoverability, ToolProvider, UpdateCheck,
 };
 
 pub const NPM_GLOBAL_PROVIDER_ID: &str = "npm-global";
@@ -514,6 +514,75 @@ impl NpmGlobalProvider {
 
 #[async_trait]
 impl ToolProvider for NpmGlobalProvider {
+    async fn plan_update_with_actions(
+        &self,
+        request: ProviderUpdateRequest,
+        context: ProviderActionContext<'_>,
+    ) -> Result<ProviderUpdateActions, ProviderError> {
+        let mut plan = self.plan_update(request).await?;
+        let (_, name) =
+            parse_installation_id(&plan.installation_id).expect("validated npm installation");
+        if let Some(allowed) = context
+            .settings
+            .npm_allow_scripts
+            .get(&name)
+            .filter(|list| !list.is_empty())
+        {
+            // An explicit CLI flag overrides .npmrc, so preserve its effective list.
+            let output = self
+                .run_required(
+                    ProviderOperation::PlanUpdate,
+                    &["config", "get", "allow-scripts", "--global", "--json"],
+                )
+                .await?;
+            let raw = String::from_utf8_lossy(&output.stdout);
+            let invalid_policy = || {
+                ProviderError::new(
+                    self.id.clone(),
+                    ProviderOperation::PlanUpdate,
+                    Recoverability::RequiresConfiguration,
+                    "无法读取 npm allow-scripts 配置，请检查配置后重试",
+                )
+            };
+            let configured: Value = if raw.trim() == "undefined" {
+                Value::Null
+            } else {
+                serde_json::from_str(&raw).map_err(|_| invalid_policy())?
+            };
+            let mut entries = allowed.clone();
+            match configured {
+                Value::String(value) => entries.extend(value.split(',').map(str::to_owned)),
+                Value::Array(values) => {
+                    for value in values {
+                        let value = value.as_str().ok_or_else(invalid_policy)?;
+                        entries.extend(value.split(',').map(str::to_owned));
+                    }
+                }
+                Value::Null => {}
+                _ => return Err(invalid_policy()),
+            }
+            entries = entries
+                .into_iter()
+                .map(|entry| entry.trim().to_owned())
+                .collect();
+            entries.retain(|entry| !entry.trim().is_empty());
+            entries.sort();
+            entries.dedup();
+            let separator = plan
+                .args
+                .iter()
+                .position(|arg| arg == "--")
+                .expect("npm plan has argument separator");
+            plan.args.splice(
+                separator..separator,
+                [
+                    format!("--allow-scripts={}", entries.join(",")),
+                    "--strict-allow-scripts".into(),
+                ],
+            );
+        }
+        Ok(plan.into())
+    }
     fn id(&self) -> ProviderId {
         self.id.clone()
     }

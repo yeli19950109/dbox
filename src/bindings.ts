@@ -110,6 +110,11 @@ export type CheckUpdatesRequest = {
 	skillIds: string[],
 };
 
+export type CommandActionDto = {
+	label: string,
+	command: CommandSpecDto,
+};
+
 export type CommandSpecDto = {
 	program: string,
 	args: string[],
@@ -120,6 +125,8 @@ export type CommandSpecDto = {
 	networkRequired: boolean,
 	postCheck: CommandSpecDto | null,
 	displayCommand: string,
+	before?: CommandActionDto[],
+	after?: CommandActionDto[],
 };
 
 export type ComponentDto = {
@@ -535,6 +542,7 @@ export type SettingsValueDto = {
 	logRetention: LogRetentionDto,
 	executableOverrides: { [key in string]: string },
 	componentStrategies: { [key in string]: { [key in string]: string } },
+	npmAllowScripts?: { [key in string]: string[] },
 };
 
 export type SkillAction = "install" | "import" | "adopt" | "toggle" | "update" | "uninstall" | "restore" | "delete_backup";

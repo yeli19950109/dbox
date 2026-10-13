@@ -116,6 +116,7 @@ export function settingsDocument(): SettingsDocumentDto {
   return {
     revision: "settings-1",
     settings: {
+      npmAllowScripts: {},
       providerEnabled: { npm: true, brew: true },
       defaultTimeoutSeconds: "120",
       logRetention: { maxFiles: 50, maxTotalBytes: "10485760" },
@@ -142,6 +143,8 @@ export function updatePlan(index = 0): UpdatePlanDto {
       successExitCodes: [0],
       networkRequired: true,
       postCheck: null,
+      before: [],
+      after: [],
       displayCommand: "npm update --global package-0",
     },
     configRevision: "config-1",

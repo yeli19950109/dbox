@@ -165,6 +165,80 @@ fn request(installation: &Installation) -> ProviderUpdateRequest {
 }
 
 #[tokio::test]
+async fn global_node_lifecycle_snapshots_before_upgrade_and_restores_afterwards() {
+    use dbox_lib::application::ConfirmUpdateRequest;
+    use dbox_lib::domain::RunStatus;
+    use tokio_util::sync::CancellationToken;
+    for (failure, expected, phases) in [
+        ("", RunStatus::Succeeded, "snapshot\nupgrade\nrestore\n"),
+        ("snapshot", RunStatus::Failed, "snapshot\n"),
+        ("upgrade", RunStatus::Failed, "snapshot\nupgrade\n"),
+        (
+            "restore",
+            RunStatus::Partial,
+            "snapshot\nupgrade\nrestore\n",
+        ),
+    ] {
+        let fake = FakeMise::new();
+        fake.active_node();
+        let after = json!({"node": [fake.record("node", "22.1.0", Some("22"))]});
+        fake.write_json("after-installed", after.clone());
+        fake.write_json("after-global", after);
+        if !failure.is_empty() {
+            fake.write(&format!("{failure}.fail"), "yes");
+        }
+        let service = fake.service();
+        let snapshot = service.refresh_tools(RefreshRequest::all()).await.unwrap();
+        let plan = service
+            .preview_updates(&[UpdateSelection {
+                tool_id: snapshot.tools[0].id.clone(),
+                component_id: ComponentId::new("core").unwrap(),
+                strategy_id: None,
+                target_version: None,
+            }])
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(plan.command.before.len(), 1);
+        assert_eq!(plan.command.after.len(), 1);
+        assert!(plan.command.before[0]
+            .command
+            .args
+            .contains(&"core:node@22.0.0".into()));
+        assert!(plan.command.after[0]
+            .command
+            .args
+            .contains(&"core:node@22".into()));
+        assert!(plan.command.after[0].label.contains("最新版"));
+        let result = service
+            .confirm_update(
+                ConfirmUpdateRequest {
+                    plan_id: plan.plan_id,
+                    plan_hash: plan.plan_hash,
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.execution.status, expected, "{failure}");
+        assert_eq!(
+            fs::read_to_string(fake.temporary.path().join("lifecycle.log")).unwrap(),
+            phases
+        );
+        if failure == "restore" {
+            assert_eq!(
+                result.snapshot.tools[0].components[0]
+                    .installed_version
+                    .as_ref()
+                    .unwrap()
+                    .raw(),
+                "22.1.0"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn restart_preview_rehydrates_mise_before_planning_and_keeps_warm_previews_fast() {
     let fake = FakeMise::new();
     fake.active_node();

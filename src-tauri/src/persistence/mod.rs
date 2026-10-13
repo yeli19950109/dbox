@@ -173,6 +173,9 @@ pub struct Settings {
     pub executable_overrides: BTreeMap<String, PathBuf>,
     #[serde(default)]
     pub component_strategies: BTreeMap<ToolId, BTreeMap<ComponentId, StrategyId>>,
+    /// Per top-level global npm package, explicit install-script approvals.
+    #[serde(default)]
+    pub npm_allow_scripts: BTreeMap<String, Vec<String>>,
 }
 
 const fn default_timeout_seconds() -> u64 {
@@ -187,6 +190,7 @@ impl Default for Settings {
             log_retention: LogRetentionPolicy::default(),
             executable_overrides: BTreeMap::new(),
             component_strategies: BTreeMap::new(),
+            npm_allow_scripts: BTreeMap::new(),
         }
     }
 }

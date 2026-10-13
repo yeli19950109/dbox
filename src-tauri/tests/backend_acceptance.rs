@@ -340,6 +340,51 @@ async fn invalid_later_plan_rejects_the_whole_batch_before_any_command_starts() 
 }
 
 #[tokio::test]
+async fn command_removed_during_batch_has_failed_history_and_a_terminal_event() {
+    let fixture = Fixture::with_commands(
+        vec![vec!["remove-self".into()], vec!["streams".into()]],
+        Default::default(),
+    );
+    let plans = fixture.preview_all().await;
+    let response = fixture
+        .api
+        .confirm_batch(ConfirmBatchRequestDto {
+            plans: plans
+                .iter()
+                .map(|plan| ConfirmRequestDto {
+                    plan_id: plan.plan_id.clone(),
+                    plan_hash: plan.plan_hash.clone(),
+                })
+                .collect(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        matches!(&response.outcomes[0], ConfirmBatchOutcomeDto::Ok { execution, .. } if execution.status == "succeeded")
+    );
+    assert!(
+        matches!(&response.outcomes[1], ConfirmBatchOutcomeDto::Error { error, .. } if error.details["reason"] == "execution_unavailable")
+    );
+    let history = fixture.api.run_history().unwrap();
+    assert_eq!(history.runs.len(), 2);
+    let failed = history
+        .runs
+        .iter()
+        .find(|run| run.status == "failed")
+        .unwrap();
+    assert!(failed.finished_at.is_some());
+    assert!(failed
+        .summary
+        .as_ref()
+        .unwrap()
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("does not exist"));
+    assert!(fixture.emitter.events().iter().any(|event| matches!(event, ApiEvent::RunState(state) if state.run_id == failed.id && matches!(&state.state, RunStateKindDto::StateChanged { status } if status == "failed"))));
+}
+
+#[tokio::test]
 async fn command_changes_before_batch_confirmation_are_still_rejected() {
     let fixture = Fixture::with_commands(
         vec![vec!["streams".into()], vec!["streams".into()]],

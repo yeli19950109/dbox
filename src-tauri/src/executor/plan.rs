@@ -78,6 +78,14 @@ pub struct CommandSpec {
     pub success_exit_codes: BTreeSet<i32>,
     pub network_required: bool,
     pub post_check: Option<Box<CommandSpec>>,
+    pub before: Vec<CommandAction>,
+    pub after: Vec<CommandAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandAction {
+    pub label: String,
+    pub command: CommandSpec,
 }
 
 impl CommandSpec {
@@ -91,6 +99,8 @@ impl CommandSpec {
             success_exit_codes: BTreeSet::from([0]),
             network_required: false,
             post_check: None,
+            before: Vec::new(),
+            after: Vec::new(),
         }
     }
 
@@ -153,6 +163,8 @@ impl CommandSpec {
                 .map(CommandSpec::view)
                 .map(Box::new),
             display_command: self.display_command(),
+            before: self.before.iter().map(CommandAction::view).collect(),
+            after: self.after.iter().map(CommandAction::view).collect(),
         }
     }
 
@@ -244,6 +256,19 @@ impl CommandSpec {
             }
             post_check.validate_at(&format!("{field_path}.post_check"), false)?;
         }
+        for (phase, actions) in [("before", &self.before), ("after", &self.after)] {
+            for (index, action) in actions.iter().enumerate() {
+                let path = format!("{field_path}.{phase}[{index}]");
+                if !allow_post_check || action.command.post_check.is_some() {
+                    return Err(CommandValidationError::new(
+                        path,
+                        CommandValidationErrorKind::NestedPostCheck,
+                        "lifecycle actions cannot contain nested actions or post-checks",
+                    ));
+                }
+                action.command.validate_at(&path, false)?;
+            }
+        }
         Ok(())
     }
 }
@@ -284,6 +309,26 @@ pub struct CommandSpecView {
     pub network_required: bool,
     pub post_check: Option<Box<CommandSpecView>>,
     pub display_command: String,
+    #[serde(default)]
+    pub before: Vec<CommandActionView>,
+    #[serde(default)]
+    pub after: Vec<CommandActionView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandActionView {
+    pub label: String,
+    pub command: CommandSpecView,
+}
+
+impl CommandAction {
+    fn view(&self) -> CommandActionView {
+        CommandActionView {
+            label: self.label.clone(),
+            command: self.command.view(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -582,6 +627,8 @@ struct CommandHashMaterial<'a> {
     success_exit_codes: &'a BTreeSet<i32>,
     network_required: bool,
     post_check: Option<Box<CommandHashMaterial<'a>>>,
+    before: Vec<(&'a str, CommandHashMaterial<'a>)>,
+    after: Vec<(&'a str, CommandHashMaterial<'a>)>,
 }
 
 impl<'a> From<&'a CommandSpec> for CommandHashMaterial<'a> {
@@ -603,6 +650,26 @@ impl<'a> From<&'a CommandSpec> for CommandHashMaterial<'a> {
                 .as_deref()
                 .map(CommandHashMaterial::from)
                 .map(Box::new),
+            before: command
+                .before
+                .iter()
+                .map(|action| {
+                    (
+                        action.label.as_str(),
+                        CommandHashMaterial::from(&action.command),
+                    )
+                })
+                .collect(),
+            after: command
+                .after
+                .iter()
+                .map(|action| {
+                    (
+                        action.label.as_str(),
+                        CommandHashMaterial::from(&action.command),
+                    )
+                })
+                .collect(),
         }
     }
 }
@@ -743,6 +810,32 @@ mod tests {
         .unwrap();
         assert_ne!(first.plan_id, second.plan_id);
         assert_eq!(first.plan_hash, second.plan_hash);
+    }
+
+    #[test]
+    fn lifecycle_actions_are_hashed_and_cannot_contain_nested_commands() {
+        let mut original = command();
+        let baseline = UpdatePlan::new(
+            ToolId::new("tool").unwrap(),
+            InstallationId::new("install").unwrap(),
+            ComponentId::new("core").unwrap(),
+            StrategyId::new("self").unwrap(),
+            original.clone(),
+            context(Utc::now()),
+        )
+        .unwrap();
+        original.before.push(CommandAction {
+            label: "snapshot".into(),
+            command: command(),
+        });
+        let mut changed = baseline.clone();
+        changed.command = original.clone();
+        assert_ne!(baseline.plan_hash, changed.recompute_hash().unwrap());
+        original.before[0].command.after.push(CommandAction {
+            label: "nested".into(),
+            command: command(),
+        });
+        assert!(original.validate().is_err());
     }
 
     #[test]

@@ -24,6 +24,10 @@ case "$mode" in
     chmod +x "$0.next"
     mv "$0.next" "$0"
     ;;
+  remove-self)
+    rm "$0"
+    printf 'removed-command\n'
+    ;;
   fail)
     printf 'command failed\n' >&2
     exit 7

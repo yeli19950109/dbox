@@ -317,6 +317,7 @@ export const useRunsStore = defineStore("runs", () => {
         config_changed: "更新配置已变化，请重新预览后再确认。",
         environment_changed: "执行命令的环境已变化，请重新预览后再确认。",
         version_changed: "待更新工具的版本状态已变化，请重新预览后再确认。",
+        execution_unavailable: "执行程序或工作目录已不可用，可能被更新移除或切换。请刷新工具并重新预览。",
       };
       error.value = messages[reason.details.reason ?? ""] ?? "计划已过期或环境已变化，请重新预览后再确认。";
       useNotificationsStore().push("warning", "需要重新预览", error.value);
