@@ -97,6 +97,12 @@ pub struct ConfirmRequestDto {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ConfirmBatchRequestDto {
+    pub plans: Vec<ConfirmRequestDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct CancelRequestDto {
     pub run_id: String,
 }
@@ -679,6 +685,30 @@ impl From<&CommandSpecView> for CommandSpecDto {
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmResponseDto {
     pub execution: ExecutionResultDto,
+    pub snapshot: SnapshotDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ConfirmBatchOutcomeDto {
+    Ok {
+        plan_id: String,
+        execution: ExecutionResultDto,
+    },
+    Error {
+        plan_id: String,
+        error: ApiErrorDto,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmBatchResponseDto {
+    pub outcomes: Vec<ConfirmBatchOutcomeDto>,
     pub snapshot: SnapshotDto,
 }
 

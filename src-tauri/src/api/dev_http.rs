@@ -80,6 +80,7 @@ pub fn dev_http_router(service: Arc<ApiService>, event_bus: DevHttpEventBus) -> 
         .route("/__dbox_http/commands/refresh", post(refresh))
         .route("/__dbox_http/commands/preview", post(preview))
         .route("/__dbox_http/commands/confirm", post(confirm))
+        .route("/__dbox_http/commands/confirm_batch", post(confirm_batch))
         .route("/__dbox_http/commands/cancel", post(cancel))
         .route("/__dbox_http/commands/run_history", post(run_history))
         .route("/__dbox_http/commands/run_log", post(run_log))
@@ -223,6 +224,13 @@ async fn confirm(
     Json(request): Json<ConfirmRequestDto>,
 ) -> Json<CommandResponse<ConfirmResponseDto>> {
     Json(state.service.confirm(request).await.into())
+}
+
+async fn confirm_batch(
+    State(state): State<DevHttpState>,
+    Json(request): Json<ConfirmBatchRequestDto>,
+) -> Json<CommandResponse<ConfirmBatchResponseDto>> {
+    Json(state.service.confirm_batch(request).await.into())
 }
 
 async fn cancel(
@@ -638,6 +646,12 @@ mod tests {
                 json!({ "planId": "invalid", "planHash": "invalid" }),
                 "error",
             ),
+            ("confirm_batch", json!({ "plans": [] }), "error"),
+            (
+                "confirm_batch",
+                json!({ "plans": [{ "planId": "invalid", "planHash": "invalid" }] }),
+                "error",
+            ),
             ("cancel", json!({ "runId": "invalid run" }), "error"),
             ("run_history", json!({}), "ok"),
             ("run_log", json!({ "runId": "invalid run" }), "error"),
@@ -860,6 +874,10 @@ mod tests {
                     provider_id: Some("provider".into()),
                     completed: Some(1),
                     total: Some(2),
+                    stage: None,
+                    package_name: None,
+                    item_completed: None,
+                    item_total: None,
                 }),
                 "refresh-progress",
                 "\"requestId\":\"request\"",

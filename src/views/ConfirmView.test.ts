@@ -2,7 +2,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
-import type { ConfirmResponseDto } from "../bindings";
+import type { ConfirmBatchResponseDto } from "../bindings";
 import { setTransportForTests } from "../api/transport";
 import { snapshotWithTools, updatePlan } from "../test/fixtures";
 import { apiError, createMockTransport, ok } from "../test/mockTransport";
@@ -26,11 +26,11 @@ describe("confirmed execution live view", () => {
   beforeEach(() => setActivePinia(createPinia()));
 
   it("opens the run page and streams output while confirm is still pending", async () => {
-    let finish!: (value: { status: "ok"; data: ConfirmResponseDto }) => void;
-    const response = new Promise<{ status: "ok"; data: ConfirmResponseDto }>((resolve) => { finish = resolve; });
+    let finish!: (value: { status: "ok"; data: ConfirmBatchResponseDto }) => void;
+    const response = new Promise<{ status: "ok"; data: ConfirmBatchResponseDto }>((resolve) => { finish = resolve; });
     const plan = updatePlan();
     const snapshot = snapshotWithTools();
-    const mock = createMockTransport({ preview: vi.fn(() => ok([plan])), confirm: vi.fn(() => response) });
+    const mock = createMockTransport({ preview: vi.fn(() => ok([plan])), confirmBatch: vi.fn(() => response) });
     setTransportForTests(mock.transport);
     useSnapshotStore().acceptSnapshot(snapshot);
     const runs = useRunsStore();
@@ -44,9 +44,9 @@ describe("confirmed execution live view", () => {
     expect(router.currentRoute.value.name).toBe("runs");
     expect(runs.executing).toBe(true);
     expect(wrapper.text()).toContain("正在启动更新");
-    expect(mock.transport.commands.confirm).toHaveBeenCalledTimes(1);
+    expect(mock.transport.commands.confirmBatch).toHaveBeenCalledTimes(1);
     await runs.confirmPlans();
-    expect(mock.transport.commands.confirm).toHaveBeenCalledTimes(1);
+    expect(mock.transport.commands.confirmBatch).toHaveBeenCalledTimes(1);
     mock.emit("runState", { runId: "live-run", sequence: "1", timestamp: "2026-09-07T10:00:00Z", state: { kind: "state_changed", status: "running" } });
     mock.emit("runOutput", { runId: "live-run", firstSequence: "2", lastSequence: "2", timestamp: "2026-09-07T10:00:01Z", chunks: [{ sequence: "2", stream: "stdout", message: "Downloading fixture..." }] });
     await flushPromises();
@@ -58,7 +58,7 @@ describe("confirmed execution live view", () => {
     await flushPromises();
     expect(wrapper.get('[role="log"]').text()).toContain("Installing fixture...");
     finish({ status: "ok", data: {
-      execution: { runId: "live-run", status: "succeeded", exitCode: 0, startedAt: "2026-09-07T10:00:00Z", finishedAt: "2026-09-07T10:00:03Z", outputTail: "finished", verification: null },
+      outcomes: [{ status: "ok", planId: plan.planId, execution: { runId: "live-run", status: "succeeded", exitCode: 0, startedAt: "2026-09-07T10:00:00Z", finishedAt: "2026-09-07T10:00:03Z", outputTail: "finished", verification: null } }],
       snapshot,
     } });
     await flushPromises();
@@ -71,7 +71,7 @@ describe("confirmed execution live view", () => {
 
   it("keeps expired-plan recovery available on the run page without executing again", async () => {
     const plan = updatePlan();
-    const mock = createMockTransport({ preview: vi.fn(() => ok([plan])), confirm: vi.fn(() => apiError("invalid_plan", "expired")) });
+    const mock = createMockTransport({ preview: vi.fn(() => ok([plan])), confirmBatch: vi.fn(() => apiError("invalid_plan", "expired")) });
     setTransportForTests(mock.transport);
     const runs = useRunsStore();
     await runs.preview([{ toolId: plan.toolId, componentId: "core", strategyId: null, targetVersion: null }]);
@@ -85,7 +85,7 @@ describe("confirmed execution live view", () => {
     await wrapper.get('[role="alert"] button').trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.name).toBe("confirm");
-    expect(mock.transport.commands.confirm).toHaveBeenCalledTimes(1);
+    expect(mock.transport.commands.confirmBatch).toHaveBeenCalledTimes(1);
     wrapper.unmount();
     runs.disconnectEvents();
   });

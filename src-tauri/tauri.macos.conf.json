@@ -3,6 +3,7 @@
   "bundle": {
     "resources": [
       "resources/catalog/*.toml",
+      "resources/licenses/*.txt",
       "Assets.car"
     ]
   }

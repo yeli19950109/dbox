@@ -16,8 +16,9 @@ use crate::domain::{
 use crate::version::{ComponentStatus, StatusReason, VersionValue};
 
 use super::{
-    ProviderCapabilities, ProviderError, ProviderOperation, ProviderStatus, ProviderUpdatePlan,
-    ProviderUpdateRequest, Recoverability, ToolProvider, UpdateCheck,
+    ProviderCapabilities, ProviderError, ProviderOperation, ProviderProgress,
+    ProviderProgressCallback, ProviderStatus, ProviderUpdatePlan, ProviderUpdateRequest,
+    Recoverability, ToolProvider, UpdateCheck,
 };
 
 pub const HOMEBREW_PROVIDER_ID: &str = "homebrew";
@@ -563,6 +564,14 @@ impl ToolProvider for HomebrewProvider {
     }
 
     async fn scan(&self) -> Result<Vec<Installation>, ProviderError> {
+        self.scan_with_progress(&mut |_| {}).await
+    }
+
+    async fn scan_with_progress(
+        &self,
+        on_progress: &mut ProviderProgressCallback<'_>,
+    ) -> Result<Vec<Installation>, ProviderError> {
+        on_progress(ProviderProgress::default());
         self.reset_scan_state();
         let environment = self
             .load_environment(ProviderOperation::Scan, false)
@@ -611,6 +620,8 @@ impl ToolProvider for HomebrewProvider {
                 }),
             }
         }
+        let total = formula_installations.len() + casks.len();
+        on_progress(ProviderProgress::items(None, 0, total));
         let mut formula_executables = self
             .formula_executables(&environment, &formula_installations)
             .await;
@@ -618,9 +629,24 @@ impl ToolProvider for HomebrewProvider {
             if let Some(executables) = formula_executables.remove(&installation.id) {
                 installation.set_executables(executables);
             }
+            let package_name = installation.package.name.clone();
             installations.push(installation);
+            on_progress(ProviderProgress::items(
+                Some(package_name),
+                installations.len(),
+                total,
+            ));
         }
-        for cask in casks {
+        let formula_count = installations.len();
+        for (index, cask) in casks.iter().enumerate() {
+            let package_name = cask
+                .as_object()
+                .and_then(|object| package_name(object, "full_token", "token"));
+            on_progress(ProviderProgress::items(
+                package_name.clone(),
+                formula_count + index,
+                total,
+            ));
             match self.cask_installation(&environment, cask) {
                 Some(installation) => installations.push(installation),
                 None => self.record_diagnostic(BrewDiagnostic {
@@ -631,6 +657,11 @@ impl ToolProvider for HomebrewProvider {
                     recoverability: Recoverability::Permanent,
                 }),
             }
+            on_progress(ProviderProgress::items(
+                package_name,
+                formula_count + index + 1,
+                total,
+            ));
         }
         installations.sort_by(|left, right| left.id.cmp(&right.id));
         Ok(installations)

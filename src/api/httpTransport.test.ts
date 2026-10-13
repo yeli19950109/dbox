@@ -148,11 +148,14 @@ describe("Dev HTTP events", () => {
     const stopOutput = await httpTransport.events.runOutput.listen(vi.fn());
     const stopState = await httpTransport.events.runState.listen(vi.fn());
     expect(eventSources).toHaveLength(1);
-    const pending = httpTransport.commands.confirm({ planId: "plan", planHash: "hash" });
+    const pending = httpTransport.commands.confirmBatch({ plans: [{ planId: "plan", planHash: "hash" }, { planId: "plan-2", planHash: "hash-2" }] });
     expect(fetchMock).not.toHaveBeenCalled();
     eventSources[0]!.dispatch("open", {});
     await pending;
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/__dbox_http/commands/confirm_batch", expect.objectContaining({
+      body: JSON.stringify({ plans: [{ planId: "plan", planHash: "hash" }, { planId: "plan-2", planHash: "hash-2" }] }),
+    }));
     stopOutput();
     expect(eventSources[0]!.close).not.toHaveBeenCalled();
     stopState();
@@ -164,7 +167,7 @@ describe("Dev HTTP events", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const stop = await httpTransport.events.runOutput.listen(vi.fn());
-    const pending = httpTransport.commands.confirm({ planId: "plan", planHash: "hash" });
+    const pending = httpTransport.commands.confirmBatch({ plans: [{ planId: "plan", planHash: "hash" }] });
     const rejected = expect(pending).rejects.toThrow("实时事件连接失败");
     eventSources[0]!.dispatch("error", {});
     await rejected;

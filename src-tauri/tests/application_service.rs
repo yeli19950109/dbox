@@ -12,13 +12,15 @@ use async_trait::async_trait;
 use chrono::Utc;
 use dbox_lib::application::{
     ApplicationEnvironment, ApplicationError, ApplicationService, ApplicationServiceOptions,
-    ConfirmUpdateRequest, RefreshRequest, RefreshScope, UpdateSelection,
+    ConfirmUpdateRequest, RefreshRequest, RefreshScope, ResolverApplicationEnvironment,
+    UpdateSelection,
 };
 use dbox_lib::catalog::{built_in_manifests, Catalog};
 use dbox_lib::domain::{
     ComponentId, Installation, InstallationScope, PackageCoordinate, PackageKind, ProviderId,
     RunStatus, StrategyId,
 };
+use dbox_lib::environment::{EnvironmentResolver, WhichLocator};
 use dbox_lib::executor::{CommandExecutor, NoopEventSink, PlanError};
 use dbox_lib::persistence::{AppPaths, PersistenceStore};
 use dbox_lib::providers::{
@@ -312,6 +314,71 @@ async fn pi_preferences_and_component_plans_are_deterministic_and_never_use_all(
     assert!(batch
         .iter()
         .all(|plan| !plan.command.args.iter().any(|argument| argument == "--all")));
+}
+
+#[tokio::test]
+async fn resolving_later_commands_does_not_invalidate_earlier_plans_in_the_same_preview() {
+    let fixture = Fixture::new();
+    for name in ["npm", "pi"] {
+        fs::copy(&fixture.program, fixture.temporary.path().join(name)).unwrap();
+    }
+    let pi = installation(
+        "npm-global",
+        PackageKind::NpmGlobal,
+        "@earendil-works/pi-coding-agent",
+        "1.0.0",
+    );
+    let provider = FakeProvider::new(ProviderId::new("npm-global").unwrap())
+        .with_scan_result(Ok(vec![pi.clone()]))
+        .with_check_result(Ok(vec![checked(&pi, "2.0.0")]));
+    let mut registry = ProviderRegistry::new();
+    registry.register(Arc::new(provider)).unwrap();
+    let environment = Arc::new(ResolverApplicationEnvironment::new(
+        EnvironmentResolver::new(
+            Arc::new(WhichLocator),
+            fixture.temporary.path().as_os_str().to_owned(),
+            fixture.temporary.path().to_owned(),
+        ),
+    ));
+    let service = fixture.service(
+        registry,
+        Catalog::build(built_in_manifests()).unwrap(),
+        environment,
+    );
+    let snapshot = service.refresh_tools(RefreshRequest::all()).await.unwrap();
+    let tool_id = snapshot.tools[0].id.clone();
+    let plans = service
+        .preview_updates(&[
+            UpdateSelection {
+                tool_id: tool_id.clone(),
+                component_id: ComponentId::new("core").unwrap(),
+                strategy_id: Some(StrategyId::new("npm-global").unwrap()),
+                target_version: None,
+            },
+            UpdateSelection {
+                tool_id,
+                component_id: ComponentId::new("extensions").unwrap(),
+                strategy_id: None,
+                target_version: None,
+            },
+        ])
+        .await
+        .unwrap();
+    // Both commands are fixtures; their arguments are intentionally unsupported.
+    // They must reach execution instead of being rejected as a changed environment.
+    for plan in plans {
+        let result = service
+            .confirm_update(
+                ConfirmUpdateRequest {
+                    plan_id: plan.plan_id,
+                    plan_hash: plan.plan_hash,
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.execution.exit_code, Some(64));
+    }
 }
 
 #[tokio::test]

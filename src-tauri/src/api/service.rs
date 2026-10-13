@@ -11,8 +11,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::{
     ApplicationError, ApplicationService, ApplicationServiceOptions, ConfirmUpdateRequest,
-    ProviderRefreshProgress, RefreshRequest, RefreshScope, ResolverApplicationEnvironment,
-    UpdateSelection,
+    ProviderRefreshProgress, RefreshRequest, RefreshScope, RefreshStage,
+    ResolverApplicationEnvironment, UpdateSelection,
 };
 use crate::catalog::{load_catalog_with_built_ins, CatalogError, CatalogLayer, LoadedManifest};
 use crate::domain::{ComponentId, ProviderId, RunId, StrategyId, ToolId};
@@ -30,7 +30,7 @@ use crate::version::VersionValue;
 use super::dto::*;
 use super::events::{
     ApiEvent, ApiEventEmitter, BufferedExecutionEventSink, RefreshPhaseDto,
-    RefreshProgressEventDto, TauriApiEventEmitter, ToolStateEventDto,
+    RefreshProgressEventDto, RefreshStageDto, TauriApiEventEmitter, ToolStateEventDto,
 };
 
 pub struct ApiService {
@@ -279,6 +279,66 @@ impl ApiService {
         })
     }
 
+    pub async fn confirm_batch(
+        &self,
+        request: ConfirmBatchRequestDto,
+    ) -> Result<ConfirmBatchResponseDto, ApiErrorDto> {
+        if request.plans.is_empty() {
+            return Err(invalid_field("plans", "at least one plan is required"));
+        }
+        let mut requests = Vec::with_capacity(request.plans.len());
+        let mut plan_ids = Vec::with_capacity(request.plans.len());
+        for plan in request.plans {
+            let plan_id = PlanId::from_str(&plan.plan_id)
+                .map_err(|_| invalid_field("planId", "plan ID must be a UUID"))?;
+            let plan_hash = PlanHash::from_str(&plan.plan_hash)
+                .map_err(|error| invalid_field("planHash", error.to_string()))?;
+            let run_id =
+                RunId::new(uuid::Uuid::new_v4().to_string()).expect("a UUID is a valid run ID");
+            plan_ids.push(plan.plan_id);
+            requests.push((
+                ConfirmUpdateRequest { plan_id, plan_hash },
+                run_id,
+                CancellationToken::new(),
+            ));
+        }
+        let run_ids: Vec<_> = requests.iter().map(|(_, id, _)| id.clone()).collect();
+        {
+            let mut active = self.active_runs.lock().await;
+            for (_, id, cancellation) in &requests {
+                active.insert(id.clone(), cancellation.clone());
+            }
+        }
+        let result = self
+            .application
+            .confirm_updates_with_run_ids(requests)
+            .await;
+        {
+            let mut active = self.active_runs.lock().await;
+            for id in run_ids {
+                active.remove(&id);
+            }
+        }
+        let outcomes = result
+            .map_err(application_error)?
+            .into_iter()
+            .zip(plan_ids)
+            .map(|(outcome, plan_id)| match outcome {
+                Ok(update) => ConfirmBatchOutcomeDto::Ok {
+                    plan_id,
+                    execution: ExecutionResultDto::from(&update.execution),
+                },
+                Err(error) => ConfirmBatchOutcomeDto::Error {
+                    plan_id,
+                    error: application_error(error),
+                },
+            })
+            .collect();
+        let snapshot = self.snapshot().await?;
+        self.emit_tool_state(&snapshot);
+        Ok(ConfirmBatchResponseDto { outcomes, snapshot })
+    }
+
     pub async fn cancel(
         &self,
         request: CancelRequestDto,
@@ -489,6 +549,15 @@ impl ApiService {
                 provider_id: progress.map(|item| item.provider_id.to_string()),
                 completed: progress.map(|item| item.completed as u32),
                 total: progress.map(|item| item.total as u32),
+                stage: progress.map(|item| match item.stage {
+                    RefreshStage::Probe => RefreshStageDto::Probe,
+                    RefreshStage::Scan => RefreshStageDto::Scan,
+                    RefreshStage::CheckUpdates => RefreshStageDto::CheckUpdates,
+                }),
+                package_name: progress.and_then(|item| item.detail.package_name.clone()),
+                item_completed: progress
+                    .and_then(|item| item.detail.completed.map(|count| count as u32)),
+                item_total: progress.and_then(|item| item.detail.total.map(|count| count as u32)),
             }));
     }
 
@@ -510,6 +579,10 @@ impl ApiService {
                 provider_id: None,
                 completed: Some(completed as u32),
                 total: Some(total as u32),
+                stage: None,
+                package_name: None,
+                item_completed: None,
+                item_total: None,
             }));
     }
 
@@ -722,6 +795,13 @@ fn application_error(error: ApplicationError) -> ApiErrorDto {
 }
 
 fn plan_error(error: PlanError) -> ApiErrorDto {
+    let reason = match &error {
+        PlanError::Expired => "expired",
+        PlanError::ConfigChanged => "config_changed",
+        PlanError::EnvironmentChanged => "environment_changed",
+        PlanError::VersionChanged => "version_changed",
+        _ => "invalid",
+    };
     let retryable = matches!(
         error,
         PlanError::Expired
@@ -730,6 +810,7 @@ fn plan_error(error: PlanError) -> ApiErrorDto {
             | PlanError::VersionChanged
     );
     ApiErrorDto::new(ApiErrorCode::InvalidPlan, error.to_string(), retryable)
+        .with_detail("reason", reason)
 }
 
 fn registry_error(error: ProviderRegistryError) -> ApiErrorDto {

@@ -42,9 +42,9 @@ describe("snapshot store", () => {
 
   it("drops stale refresh progress events independently per request", () => {
     const store = useSnapshotStore();
-    store.applyRefreshProgress({ requestId: "a", sequence: "2", phase: "completed", message: "done", providerId: null, completed: 2, total: 2 });
-    store.applyRefreshProgress({ requestId: "a", sequence: "1", phase: "started", message: "stale", providerId: null, completed: null, total: null });
-    store.applyRefreshProgress({ requestId: "b", sequence: "1", phase: "failed", message: "partial", providerId: null, completed: 0, total: 1 });
+    store.applyRefreshProgress({ requestId: "a", sequence: "2", phase: "completed", message: "done", providerId: null, stage: null, packageName: null, itemCompleted: null, itemTotal: null, completed: 2, total: 2 });
+    store.applyRefreshProgress({ requestId: "a", sequence: "1", phase: "started", message: "stale", providerId: null, stage: null, packageName: null, itemCompleted: null, itemTotal: null, completed: null, total: null });
+    store.applyRefreshProgress({ requestId: "b", sequence: "1", phase: "failed", message: "partial", providerId: null, stage: null, packageName: null, itemCompleted: null, itemTotal: null, completed: 0, total: 1 });
 
     expect(store.refreshProgress).toHaveLength(2);
     expect(store.refreshProgress.find((event) => event.requestId === "a")?.message).toBe("done");
@@ -60,6 +60,10 @@ describe("snapshot store", () => {
       providerId: "homebrew",
       completed: 1,
       total: 2,
+      stage: "probe",
+      packageName: null,
+      itemCompleted: null,
+      itemTotal: null,
     });
 
     expect(store.currentRefreshProgress?.providerId).toBe("homebrew");

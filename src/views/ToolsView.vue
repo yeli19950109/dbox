@@ -59,6 +59,15 @@
           <button v-if="compactFilters" class="button secondary" type="button" @click="filterDialog?.showModal()">
             筛选<span v-if="activeFilterCount"> · {{ activeFilterCount }}</span>
           </button>
+          <button
+            class="button primary"
+            type="button"
+            :disabled="updateBusy || !visibleUpdates.length"
+            title="直接更新当前筛选结果中的所有可更新项"
+            @click="updateNow(visibleUpdates)"
+          >
+            一键更新<span v-if="visibleUpdates.length"> · {{ visibleUpdates.length }} 项</span>
+          </button>
         </section>
 
         <section
@@ -74,14 +83,14 @@
               <span>{{ refreshProgressDetail }}</span>
             </div>
             <span v-if="refreshProgressTotal" class="refresh-progress__count">
-              {{ refreshProgressPosition }} / {{ refreshProgressTotal }}
+              {{ refreshProgressCompleted }} / {{ refreshProgressTotal }}
             </span>
           </div>
           <div
             class="refresh-progress__track"
             :data-indeterminate="!refreshProgressTotal"
             role="progressbar"
-            aria-label="刷新工具进度"
+            :aria-label="refreshItemProgress ? '当前来源的软件进度' : '刷新来源进度'"
             aria-valuemin="0"
             :aria-valuemax="refreshProgressTotal || undefined"
             :aria-valuenow="refreshProgressTotal ? refreshProgressCompleted : undefined"
@@ -102,7 +111,10 @@
           <span>{{ store.error }}</span>
           <button type="button" class="text-button" @click="initialize">重试</button>
         </div>
-        <AppLoading v-else-if="store.loading && !store.snapshot" label="正在读取工具快照…" />
+        <div v-if="runs.error && !store.error" class="inline-error" role="alert">
+          {{ runs.error }}
+        </div>
+        <AppLoading v-if="store.loading && !store.snapshot" label="正在读取工具快照…" />
         <AppEmptyState
           v-else-if="!filteredRecords.length"
           title="没有符合条件的工具"
@@ -131,8 +143,10 @@
                 v-if="filteredRecords[virtualRow.index]"
                 :record="filteredRecords[virtualRow.index]!"
                 :selected="selected"
+                :update-disabled="updateBusy"
                 @details="openDetails(filteredRecords[virtualRow.index]!, $event)"
                 @select-updates="selectToolUpdates(filteredRecords[virtualRow.index]!)"
+                @update="updateNow(selectionsFor([filteredRecords[virtualRow.index]!]))"
               />
             </div>
           </div>
@@ -143,8 +157,11 @@
           <button type="button" class="text-button" @click="selected = new Set()">
             清除
           </button>
-          <button type="button" class="button primary" @click="previewSelected">
+          <button type="button" class="button secondary" :disabled="updateBusy || !selectedUpdates.length" @click="previewSelected">
             预览更新
+          </button>
+          <button type="button" class="button primary" :disabled="updateBusy || !selectedUpdates.length" @click="updateNow(selectedUpdates)">
+            更新所选
           </button>
         </div>
 
@@ -250,6 +267,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useDebounceFn, useMediaQuery } from "@vueuse/core";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import { useRouter } from "vue-router";
+import type { UpdateSelectionDto } from "../bindings";
 import AppEmptyState from "../components/AppEmptyState.vue";
 import AppLoading from "../components/AppLoading.vue";
 import ToolCard from "../components/ToolCard.vue";
@@ -282,6 +300,8 @@ const activeFilterCount = computed(() =>
   Number(categoryFilter.value !== "all") + Number(includeHidden.value),
 );
 const selected = ref<Set<string>>(new Set());
+const previewing = ref(false);
+const updateBusy = computed(() => store.loading || runs.startingUpdate || runs.executing || previewing.value);
 const strategies = ref<Record<string, string>>({});
 const detailRecord = ref<ToolRecord | null>(null);
 const detailClose = ref<HTMLButtonElement | null>(null);
@@ -305,31 +325,49 @@ const providerErrors = computed(
   () => store.snapshot?.providers.filter((provider) => provider.errors.length) ?? [],
 );
 const lastChecked = computed(() => formatDate(store.snapshot?.refreshedAt));
-const refreshProgressTotal = computed(() => store.currentRefreshProgress?.total ?? 0);
-const refreshProgressCompleted = computed(
-  () => store.currentRefreshProgress?.completed ?? 0,
+const refreshItemProgress = computed(() => (store.currentRefreshProgress?.itemTotal ?? 0) > 0);
+const refreshProgressTotal = computed(() => refreshItemProgress.value
+  ? store.currentRefreshProgress?.itemTotal ?? 0
+  : store.currentRefreshProgress?.total ?? 0,
 );
-const refreshProgressPosition = computed(() =>
-  refreshProgressTotal.value
-    ? Math.min(refreshProgressCompleted.value + 1, refreshProgressTotal.value)
-    : 0,
-);
-const refreshProgressTitle = computed(() =>
-  store.currentRefreshProgress?.providerId
-    ? `正在检查 ${store.currentRefreshProgress.providerId}`
-    : "正在准备刷新",
-);
-const refreshProgressDetail = computed(() =>
-  refreshProgressTotal.value
-    ? `正在处理第 ${refreshProgressPosition.value} 个，共 ${refreshProgressTotal.value} 个 Provider`
-    : "正在连接后端并准备检查 Provider…",
-);
+const refreshProgressCompleted = computed(() => Math.min(refreshProgressTotal.value, Math.max(0,
+  (refreshItemProgress.value
+    ? store.currentRefreshProgress?.itemCompleted
+    : store.currentRefreshProgress?.completed) ?? 0,
+)));
+const refreshProgressTitle = computed(() => {
+  const progress = store.currentRefreshProgress;
+  if (progress?.phase === "completed") return "刷新完成";
+  if (progress?.phase === "failed") return "刷新未完成";
+  if (!progress?.providerId) return "正在准备刷新";
+  const name = progress.packageName ?? providerLabel(progress.providerId);
+  if (progress.stage === "scan") return `扫描软件 · ${name}`;
+  if (progress.stage === "check_updates") return `检查更新 · ${name}`;
+  return `正在检查 ${name}`;
+});
+const refreshProgressDetail = computed(() => {
+  const progress = store.currentRefreshProgress;
+  if (!progress?.providerId) {
+    return progress?.phase === "completed" ? "所有来源已完成检查" : "正在连接后端并准备检查…";
+  }
+  const source = `${providerLabel(progress.providerId)}${progress.total
+    ? ` · 来源 ${Math.min((progress.completed ?? 0) + 1, progress.total)} / ${progress.total}` : ""}`;
+  if (refreshItemProgress.value) {
+    const action = progress.stage === "scan" ? "已扫描" : "已检查";
+    const batch = progress.stage === "check_updates" && !progress.packageName
+      && refreshProgressCompleted.value < refreshProgressTotal.value ? " · 正在批量查询版本" : "";
+    return `${source} · ${action} ${refreshProgressCompleted.value} / ${refreshProgressTotal.value} 项${batch}`;
+  }
+  if (progress.stage === "scan") return `${source} · 正在读取软件清单…`;
+  if (progress.stage === "check_updates") return `${source} · 正在查询版本…`;
+  return `${source} · 正在检测可用性…`;
+});
 const refreshProgressBarStyle = computed(() => {
   if (!refreshProgressTotal.value) return undefined;
   const percent = Math.round(
     (refreshProgressCompleted.value / refreshProgressTotal.value) * 100,
   );
-  return { width: `${Math.max(6, percent)}%` };
+  return { width: `${percent}%` };
 });
 
 const filteredRecords = computed(() =>
@@ -377,6 +415,11 @@ const filteredRecords = computed(() =>
   }).sort(compareToolUpdatePriority),
 );
 
+const visibleUpdates = computed(() => selectionsFor(filteredRecords.value));
+const selectedUpdates = computed(() => selectionsFor(store.toolRecords).filter((selection) =>
+  selected.value.has(`${selection.toolId}\u0000${selection.componentId}`),
+));
+
 const virtualizer = useVirtualizer(
   computed(() => ({
     count: filteredRecords.value.length,
@@ -420,23 +463,36 @@ function setStrategy(record: ToolRecord, componentId: string, strategy: string):
   strategies.value = { ...strategies.value, [key(record, componentId)]: strategy };
 }
 
-async function previewSelected(): Promise<void> {
-  const selections = store.toolRecords.flatMap((record) =>
-    record.tool.components.flatMap((component) =>
-      selected.value.has(key(record, component.id))
-        ? [
-            {
-              toolId: record.tool.id,
-              componentId: component.id,
-              strategyId: strategyFor(record, component.id) || null,
-              targetVersion: null,
-            },
-          ]
-        : [],
-    ),
+function selectionsFor(records: ToolRecord[]): UpdateSelectionDto[] {
+  return records.flatMap((record) =>
+    updateableComponents(record.tool).map((component) => ({
+      toolId: record.tool.id,
+      componentId: component.id,
+      strategyId: strategyFor(record, component.id) || null,
+      targetVersion: null,
+    })),
   );
-  await runs.preview(selections);
-  await router.push({ name: "confirm" });
+}
+
+async function updateNow(selections: UpdateSelectionDto[]): Promise<void> {
+  if (updateBusy.value || !selections.length) return;
+  const execution = runs.updateNow(selections).catch(() => undefined);
+  selected.value = new Set();
+  await router.push({ name: "runs" });
+  await execution;
+}
+
+async function previewSelected(): Promise<void> {
+  if (updateBusy.value || !selectedUpdates.value.length) return;
+  previewing.value = true;
+  try {
+    await runs.preview(selectedUpdates.value);
+    await router.push({ name: "confirm" });
+  } catch {
+    // The store exposes the backend error for the inline message.
+  } finally {
+    previewing.value = false;
+  }
 }
 
 function openDetails(record: ToolRecord, event: MouseEvent): void {
@@ -486,3 +542,27 @@ function initialize(): void {
 }
 onMounted(initialize);
 </script>
+
+<style scoped>
+.refresh-progress__summary strong {
+  overflow-wrap: anywhere;
+}
+
+.refresh-progress__count {
+  flex-shrink: 0;
+}
+
+@media (max-width: 760px) {
+  .tool-search {
+    flex-wrap: wrap;
+  }
+
+  .tool-search .search-field {
+    flex-basis: 100%;
+  }
+
+  .selection-bar {
+    flex-wrap: wrap;
+  }
+}
+</style>

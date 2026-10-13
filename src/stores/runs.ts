@@ -52,8 +52,10 @@ export const useRunsStore = defineStore("runs", () => {
   const needsRepreview = ref(false);
   const loadingHistory = ref(false);
   const executing = ref(false);
+  const startingUpdate = ref(false);
   const error = ref<string | null>(null);
   const logRevision = ref(0);
+  let previewing = false;
   let eventCleanup: Array<() => void> = [];
   let eventsConnected = false;
   let connectingEvents: Promise<void> | null = null;
@@ -181,18 +183,46 @@ export const useRunsStore = defineStore("runs", () => {
   }
 
   async function preview(selections: UpdateSelectionDto[]): Promise<UpdatePlanDto[]> {
+    if (startingUpdate.value || executing.value || previewing) {
+      throw new Error("正在准备或执行更新，请稍后重试。");
+    }
+    return preparePlans(selections);
+  }
+
+  async function preparePlans(selections: UpdateSelectionDto[]): Promise<UpdatePlanDto[]> {
+    previewing = true;
     error.value = null;
     needsRepreview.value = false;
-    pendingSelections.value = selections;
+    pendingPlans.value = [];
+    pendingSelections.value = selections.map((selection) => ({ ...selection }));
     try {
       const plans = await unwrapCommand(
-        getTransport().commands.preview({ selections }),
+        getTransport().commands.preview({ selections: pendingSelections.value }),
       );
       pendingPlans.value = plans;
       return plans;
     } catch (reason) {
       error.value = reason instanceof Error ? reason.message : String(reason);
       throw reason;
+    } finally {
+      previewing = false;
+    }
+  }
+
+  async function updateNow(selections: UpdateSelectionDto[]): Promise<ExecutionResultDto[]> {
+    if (startingUpdate.value || executing.value || previewing || selections.length === 0) return [];
+    startingUpdate.value = true;
+    try {
+      await preparePlans(selections);
+      if (pendingPlans.value.length === 0) {
+        error.value = "没有可更新的工具，请刷新后重试。";
+        throw new Error(error.value);
+      }
+      const results = await executePendingPlans();
+      if (results.length === 0 && error.value) throw new Error(error.value);
+      return results;
+    } finally {
+      startingUpdate.value = false;
     }
   }
 
@@ -227,6 +257,11 @@ export const useRunsStore = defineStore("runs", () => {
   }
 
   async function confirmPlans(): Promise<ExecutionResultDto[]> {
+    if (startingUpdate.value || previewing) return [];
+    return executePendingPlans();
+  }
+
+  async function executePendingPlans(): Promise<ExecutionResultDto[]> {
     if (executing.value || pendingPlans.value.length === 0) return [];
     executing.value = true;
     error.value = null;
@@ -239,36 +274,56 @@ export const useRunsStore = defineStore("runs", () => {
         error.value = `无法连接实时日志，请重试：${reason instanceof Error ? reason.message : String(reason)}`;
         return results;
       }
-      for (const plan of plans) {
-        try {
-          // The backend plan id/hash are the only execution inputs by design.
-          const response = await unwrapCommand(
-            getTransport().commands.confirm({
-              planId: plan.planId,
-              planHash: plan.planHash,
-            }),
-          );
-          results.push(response.execution);
-          recordExecution(response.execution);
-          useSnapshotStore().acceptSnapshot(response.snapshot);
-        } catch (reason) {
-          if (reason instanceof BackendError && reason.code === "invalid_plan") {
-            needsRepreview.value = true;
-            pendingPlans.value = [];
-            error.value = "计划已过期或环境已变化，请重新预览后再确认。";
-            useNotificationsStore().push("warning", "需要重新预览", error.value);
-            break;
+      try {
+        // Confirm the complete selection before any update changes the environment.
+        const response = await unwrapCommand(
+          getTransport().commands.confirmBatch({
+            plans: plans.map((plan) => ({ planId: plan.planId, planHash: plan.planHash })),
+          }),
+        );
+        const failedPlans = new Set<string>();
+        for (const outcome of response.outcomes) {
+          if (outcome.status === "ok") {
+            results.push(outcome.execution);
+            recordExecution(outcome.execution);
+          } else {
+            failedPlans.add(outcome.planId);
+            reportConfirmationError(new BackendError(outcome.error));
           }
-          error.value = reason instanceof Error ? reason.message : String(reason);
-          useNotificationsStore().push("error", "更新未能启动", error.value);
         }
+        useSnapshotStore().acceptSnapshot(response.snapshot);
+        // Repreview only work that never started; completed items must not run twice.
+        pendingSelections.value = pendingSelections.value.filter((selection) =>
+          plans.some((plan) => failedPlans.has(plan.planId)
+            && plan.toolId === selection.toolId && plan.componentId === selection.componentId),
+        );
+        pendingPlans.value = [];
+      } catch (reason) {
+        reportConfirmationError(reason);
       }
-      if (!needsRepreview.value) pendingPlans.value = [];
       await loadHistory().catch(() => undefined);
       return results;
     } finally {
       executing.value = false;
     }
+  }
+
+  function reportConfirmationError(reason: unknown): void {
+    if (reason instanceof BackendError && reason.code === "invalid_plan") {
+      needsRepreview.value = true;
+      pendingPlans.value = [];
+      const messages: Record<string, string> = {
+        expired: "确认前计划已过期，请重新预览后再确认。",
+        config_changed: "更新配置已变化，请重新预览后再确认。",
+        environment_changed: "执行命令的环境已变化，请重新预览后再确认。",
+        version_changed: "待更新工具的版本状态已变化，请重新预览后再确认。",
+      };
+      error.value = messages[reason.details.reason ?? ""] ?? "计划已过期或环境已变化，请重新预览后再确认。";
+      useNotificationsStore().push("warning", "需要重新预览", error.value);
+      return;
+    }
+    error.value = reason instanceof Error ? reason.message : String(reason);
+    useNotificationsStore().push("error", "更新未能启动", error.value);
   }
 
   async function repreview(): Promise<UpdatePlanDto[]> {
@@ -314,6 +369,7 @@ export const useRunsStore = defineStore("runs", () => {
     needsRepreview,
     loadingHistory,
     executing,
+    startingUpdate,
     error,
     logRevision,
     applyOutput,
@@ -324,6 +380,7 @@ export const useRunsStore = defineStore("runs", () => {
     loadLog,
     hydrateHistoryRun,
     preview,
+    updateNow,
     confirmPlans,
     repreview,
     cancel,

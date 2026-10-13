@@ -101,6 +101,72 @@ impl FakeNpm {
 }
 
 #[tokio::test]
+async fn refresh_progress_preserves_batch_queries_and_reports_cached_completion() {
+    let fake = FakeNpm::new();
+    fake.write_list(json!({
+        "one": { "version": "1.0.0" },
+        "two": { "version": "1.0.0" },
+        "three": { "version": "1.0.0" },
+        "four": { "version": "1.0.0" }
+    }));
+    for name in ["one", "two", "three", "four"] {
+        fake.package(name, json!({ "version": "1.0.0" }));
+    }
+    fake.write_outdated(json!({}), 0);
+    let provider = fake.provider_with_options(NpmProviderOptions {
+        update_batch_size: 2,
+        ..NpmProviderOptions::default()
+    });
+    let mut scans = Vec::new();
+    let installations = provider
+        .scan_with_progress(&mut |progress| scans.push(progress))
+        .await
+        .unwrap();
+    assert_eq!(scans[0].total, None);
+    assert_eq!(scans.last().unwrap().completed, Some(4));
+    for name in ["one", "two", "three", "four"] {
+        assert!(scans
+            .iter()
+            .any(|event| event.package_name.as_deref() == Some(name)));
+    }
+    let mut progress = Vec::new();
+    provider
+        .check_updates_with_progress(&installations, &mut |event| progress.push(event))
+        .await
+        .unwrap();
+    assert_eq!(
+        progress
+            .iter()
+            .map(|event| event.completed)
+            .collect::<Vec<_>>(),
+        [Some(0), Some(2), Some(4)]
+    );
+    assert!(progress
+        .iter()
+        .all(|event| event.package_name.is_none() && event.total == Some(4)));
+
+    progress.clear();
+    provider
+        .check_updates_with_progress(&installations, &mut |event| progress.push(event))
+        .await
+        .unwrap();
+    assert_eq!(
+        progress
+            .iter()
+            .map(|event| event.completed)
+            .collect::<Vec<_>>(),
+        [Some(0), Some(4)]
+    );
+    assert_eq!(
+        fake.calls()
+            .iter()
+            .filter(|call| call.starts_with("[<outdated>"))
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
 async fn fake_npm_completes_probe_scan_check_and_single_package_plan() {
     let fake = FakeNpm::new();
     fake.write_list(json!({
@@ -217,7 +283,14 @@ async fn fake_npm_completes_probe_scan_check_and_single_package_plan() {
     assert_eq!(plan.program, fake.program.display().to_string());
     assert_eq!(
         plan.args,
-        ["install", "--global", "--", "@scope/tool@latest"]
+        [
+            "install",
+            "--global",
+            "--loglevel=info",
+            "--foreground-scripts",
+            "--",
+            "@scope/tool@latest"
+        ]
     );
     assert_eq!(
         plan.args

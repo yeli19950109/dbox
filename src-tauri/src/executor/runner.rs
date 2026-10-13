@@ -391,6 +391,21 @@ async fn run_command(
         )
     })?;
 
+    // Show what is starting even when the process has not produced any output yet.
+    // Keep this context out of the process output tail used by verification.
+    // Redact arguments before quoting, which may split sensitive values at quotes.
+    let display = CommandSpec::new(
+        &spec.program,
+        spec.args
+            .iter()
+            .map(|argument| redactor.redact(argument))
+            .collect(),
+    );
+    session.emit(RunEventKind::Output {
+        stream: OutputStream::System,
+        message: redactor.redact(&format!("执行命令：{}\n", display.display_command())),
+    })?;
+
     let mut command = tokio::process::Command::new(&spec.program);
     command
         .args(&spec.args)
@@ -759,6 +774,80 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn quiet_command_publishes_redacted_context_before_output_or_exit() {
+        use crate::api::{ApiEvent, BufferedExecutionEventSink, MemoryApiEventEmitter};
+
+        let temporary = TempDir::new().unwrap();
+        let program = fixture(&temporary);
+        let gate = temporary.path().join("release");
+        let secret = "super'secret";
+        let mut command = CommandSpec::new(
+            program,
+            vec![
+                "quiet-gated".into(),
+                gate.display().to_string(),
+                secret.into(),
+            ],
+        );
+        command
+            .env
+            .insert("TOKEN".into(), EnvironmentValue::secret(secret));
+        let plan = confirmed(command);
+        let emitter = Arc::new(MemoryApiEventEmitter::default());
+        let sink = Arc::new(BufferedExecutionEventSink::new(
+            emitter.clone(),
+            32,
+            Duration::from_millis(50),
+        ));
+        let executor = executor(&temporary, sink, 4096);
+        let run_id = run_id();
+        let task_run_id = run_id.clone();
+        let task = tokio::spawn(async move {
+            executor
+                .execute(task_run_id, &plan, CancellationToken::new())
+                .await
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if emitter.events().iter().any(|event| {
+                    matches!(event, ApiEvent::RunOutput(output)
+                        if output.chunks.iter().any(|chunk| chunk.message.contains("执行命令：")))
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("command context must reach the UI while the process is silent");
+        assert!(!task.is_finished(), "output must be visible before exit");
+        let events = format!("{:?}", emitter.events());
+        assert!(events.contains("quiet-gated"));
+        assert!(events.contains("[REDACTED]"));
+        assert!(!events.contains("super"));
+        assert!(!events.contains("fixture-finished"));
+        let log = std::fs::read_to_string(
+            temporary
+                .path()
+                .join("logs/runs")
+                .join(format!("{run_id}.jsonl")),
+        )
+        .unwrap();
+        assert!(log.contains("执行命令："));
+        assert!(!log.contains("super"));
+
+        std::fs::write(gate, "release").unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.status, RunStatus::Succeeded);
+        assert_eq!(result.output_tail, "fixture-finished\n");
+    }
+
+    #[tokio::test]
     async fn streams_stdout_stderr_strips_ansi_and_handles_nonzero_exit() {
         let temporary = TempDir::new().unwrap();
         let program = fixture(&temporary);
@@ -898,18 +987,14 @@ mod tests {
         let parent_file = PathBuf::from(format!("{}.parent", prefix.display()));
         let child_file = PathBuf::from(format!("{}.child", prefix.display()));
         for _ in 0..250 {
-            if parent_file.exists() && child_file.exists() {
-                let parent = std::fs::read_to_string(&parent_file)
-                    .unwrap()
-                    .trim()
-                    .parse()
-                    .unwrap();
-                let child = std::fs::read_to_string(&child_file)
-                    .unwrap()
-                    .trim()
-                    .parse()
-                    .unwrap();
-                return (parent, child);
+            // Shell redirection creates the files before printf writes their contents.
+            if let (Ok(parent), Ok(child)) = (
+                std::fs::read_to_string(&parent_file),
+                std::fs::read_to_string(&child_file),
+            ) {
+                if let (Ok(parent), Ok(child)) = (parent.trim().parse(), child.trim().parse()) {
+                    return (parent, child);
+                }
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }

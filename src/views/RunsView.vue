@@ -16,14 +16,16 @@
       >
     </div>
     <div
-      v-if="runs.executing"
+      v-if="runs.startingUpdate || runs.executing"
       class="execution-progress"
       role="status"
       aria-live="polite"
     >
       <span class="spinner" aria-hidden="true" />
       <span>{{
-        selectedRun
+        runs.startingUpdate && !runs.executing
+          ? "正在准备更新计划…"
+          : selectedRun
           ? "正在执行更新，输出会实时显示在下方。"
           : "正在启动更新，等待执行记录…"
       }}</span>
@@ -115,6 +117,7 @@
                 type="button"
                 class="text-button"
                 :aria-label="`重试 ${runName(run)}`"
+                :disabled="run.subject === 'tool_update' && (runs.startingUpdate || runs.executing)"
                 @click="retry(run)"
               >
                 {{ run.subject === "tool_update" ? "重试" : "返回资源处理" }}
@@ -180,11 +183,16 @@
               此操作已保留备份，可从对应管理页面预览恢复。
             </p>
           </section>
-          <RunLog :lines="selectedRun.lines" :revision="runs.logRevision" />
+          <RunLog
+            :key="selectedRun.id"
+            :lines="selectedRun.lines"
+            :revision="runs.logRevision"
+            :status="selectedRun.status"
+          />
         </template>
         <AppLoading
-          v-else-if="runs.executing"
-          label="等待命令启动与实时输出…"
+          v-else-if="runs.startingUpdate || runs.executing"
+          :label="runs.startingUpdate && !runs.executing ? '正在准备更新计划…' : '等待命令启动与实时输出…'"
         />
         <AppEmptyState
           v-else
@@ -309,8 +317,13 @@ async function retry(run: RunDto): Promise<void> {
     await router.push(run.subject === "skill" ? "/skills" : "/mcp");
     return;
   }
-  await runs.retry(run);
-  await router.push({ name: "confirm" });
+  if (runs.startingUpdate || runs.executing) return;
+  try {
+    await runs.retry(run);
+    await router.push({ name: "confirm" });
+  } catch {
+    // The store keeps the preparation error visible on this page.
+  }
 }
 async function repreview(): Promise<void> {
   await runs.repreview();
@@ -329,7 +342,7 @@ function reloadHistory(): void {
 onMounted(async () => {
   await runs.connectEvents().catch(() => undefined);
   await runs.loadHistory().catch(() => undefined);
-  if (selectedRunId.value || runs.executing) return;
+  if (selectedRunId.value || runs.startingUpdate || runs.executing) return;
   const active = runs.orderedLiveRuns[0];
   const historical = runs.history[0];
   if (active) selectedRunId.value = active.id;

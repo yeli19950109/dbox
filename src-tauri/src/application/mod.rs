@@ -20,13 +20,13 @@ use crate::domain::{
 };
 use crate::environment::{executable_fingerprint, EnvironmentResolver, ResolveRequest};
 use crate::executor::{
-    CommandExecutor, CommandSpec, ConfirmationContext, ExecutionError, ExecutionResult,
-    PlanContext, PlanError, PlanHash, PlanId, UpdatePlan, UpdatePlanView,
+    CommandExecutor, CommandSpec, ConfirmationContext, ConfirmedPlan, ExecutionError,
+    ExecutionResult, PlanContext, PlanError, PlanHash, PlanId, UpdatePlan, UpdatePlanView,
 };
 use crate::persistence::{PersistenceStore, Revision, Settings, StoreError, Versioned};
 use crate::providers::{
-    ProviderError, ProviderRegistry, ProviderRegistryError, ProviderStatus, ProviderUpdateRequest,
-    Recoverability, UpdateCheck,
+    ProviderError, ProviderProgress, ProviderRegistry, ProviderRegistryError, ProviderStatus,
+    ProviderUpdateRequest, Recoverability, UpdateCheck,
 };
 use crate::version::{
     verify_updated_version, ComponentStatus, StatusReason, VerificationStatus, VersionValue,
@@ -138,6 +138,15 @@ pub struct ProviderRefreshProgress {
     pub provider_id: ProviderId,
     pub completed: usize,
     pub total: usize,
+    pub stage: RefreshStage,
+    pub detail: ProviderProgress,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshStage {
+    Probe,
+    Scan,
+    CheckUpdates,
 }
 
 impl RefreshRequest {
@@ -200,6 +209,11 @@ pub struct ConfirmUpdateRequest {
 pub struct ConfirmedUpdate {
     pub execution: ExecutionResult,
     pub snapshot: ApplicationSnapshot,
+}
+
+struct PreparedUpdate {
+    plan: ConfirmedPlan,
+    previous_version: Option<VersionValue>,
 }
 
 struct ServiceState {
@@ -374,6 +388,8 @@ impl ApplicationService {
                 provider_id: provider_id.clone(),
                 completed: provider_index,
                 total: provider_total,
+                stage: RefreshStage::Probe,
+                detail: ProviderProgress::default(),
             });
             let registration = self
                 .registry
@@ -419,7 +435,19 @@ impl ApplicationService {
                     continue;
                 }
             }
-            let scanned = match provider.scan().await {
+            let mut report_progress = |stage, detail| {
+                on_progress(ProviderRefreshProgress {
+                    provider_id: provider_id.clone(),
+                    completed: provider_index,
+                    total: provider_total,
+                    stage,
+                    detail,
+                });
+            };
+            let scanned = match provider
+                .scan_with_progress(&mut |detail| report_progress(RefreshStage::Scan, detail))
+                .await
+            {
                 Ok(scanned) => scanned,
                 Err(error) => {
                     report.errors.push(error);
@@ -434,7 +462,12 @@ impl ApplicationService {
                     .cloned()
                     .map(|installation| (installation.id.clone(), installation)),
             );
-            match provider.check_updates(&scanned).await {
+            match provider
+                .check_updates_with_progress(&scanned, &mut |detail| {
+                    report_progress(RefreshStage::CheckUpdates, detail)
+                })
+                .await
+            {
                 Ok(checks) => {
                     fresh_checks.extend(checks.into_iter().map(|check| {
                         (
@@ -652,24 +685,33 @@ impl ApplicationService {
                 }
             };
             command.timeout_seconds = settings.value.default_timeout_seconds;
-            let environment_revision =
-                command_environment_revision(self.environment.as_ref(), &command.program);
-            let plan = UpdatePlan::new(
-                tool.id.clone(),
-                installation_id.clone(),
-                component.id.clone(),
-                strategy.id.clone(),
-                command,
-                PlanContext {
-                    config_revision: settings.revision.as_str().into(),
-                    environment_revision,
-                    version_snapshot: version_snapshot(tool, component),
-                    now: Utc::now(),
-                    ttl: self.options.plan_ttl,
-                },
-            )?;
-            plans.push(plan);
+            plans.push((tool, installation_id, component, strategy, command));
         }
+        // Resolve every command before capturing revisions: resolving a later command
+        // must not invalidate an earlier plan in this same preview.
+        let now = Utc::now();
+        let plans = plans
+            .into_iter()
+            .map(|(tool, installation_id, component, strategy, command)| {
+                let environment_revision =
+                    command_environment_revision(self.environment.as_ref(), &command.program);
+                let plan = UpdatePlan::new(
+                    tool.id.clone(),
+                    installation_id.clone(),
+                    component.id.clone(),
+                    strategy.id.clone(),
+                    command,
+                    PlanContext {
+                        config_revision: settings.revision.as_str().into(),
+                        environment_revision,
+                        version_snapshot: version_snapshot(tool, component),
+                        now,
+                        ttl: self.options.plan_ttl,
+                    },
+                )?;
+                Ok(plan)
+            })
+            .collect::<Result<Vec<_>, ApplicationError>>()?;
         let views = plans.iter().map(UpdatePlan::view).collect();
         let mut state = self.state.write().await;
         state
@@ -696,6 +738,54 @@ impl ApplicationService {
         cancellation: CancellationToken,
     ) -> Result<ConfirmedUpdate, ApplicationError> {
         let _operation = self.operation.lock().await;
+        let prepared = self.prepare_update(&request, Utc::now()).await?;
+        self.state.write().await.plans.remove(&request.plan_id);
+        self.execute_prepared_update(prepared, run_id, cancellation)
+            .await
+    }
+
+    pub async fn confirm_updates_with_run_ids(
+        &self,
+        requests: Vec<(ConfirmUpdateRequest, RunId, CancellationToken)>,
+    ) -> Result<Vec<Result<ConfirmedUpdate, ApplicationError>>, ApplicationError> {
+        let _operation = self.operation.lock().await;
+        let now = Utc::now();
+        let mut prepared = Vec::with_capacity(requests.len());
+        let mut unique = BTreeSet::new();
+        for (request, run_id, cancellation) in requests {
+            let update = self.prepare_update(&request, now).await?;
+            let plan = update.plan.plan();
+            if !unique.insert((plan.tool_id.clone(), plan.component_id.clone())) {
+                return Err(ApplicationError::DuplicateSelection {
+                    tool_id: plan.tool_id.clone(),
+                    component_id: plan.component_id.clone(),
+                });
+            }
+            prepared.push((update, run_id, cancellation));
+        }
+        // Accept the whole batch before any command can change the environment.
+        // The preview deadline applies to consent, not time spent in the queue.
+        {
+            let mut state = self.state.write().await;
+            for (update, _, _) in &prepared {
+                state.plans.remove(&update.plan.plan().plan_id);
+            }
+        }
+        let mut outcomes = Vec::with_capacity(prepared.len());
+        for (update, run_id, cancellation) in prepared {
+            outcomes.push(
+                self.execute_prepared_update(update, run_id, cancellation)
+                    .await,
+            );
+        }
+        Ok(outcomes)
+    }
+
+    async fn prepare_update(
+        &self,
+        request: &ConfirmUpdateRequest,
+        now: DateTime<Utc>,
+    ) -> Result<PreparedUpdate, ApplicationError> {
         let plan = self
             .state
             .read()
@@ -733,10 +823,26 @@ impl ApplicationService {
                     &plan.command.program,
                 ),
                 version_snapshot: version_snapshot(&tool, &component),
-                now: Utc::now(),
+                now,
             },
         )?;
+        Ok(PreparedUpdate {
+            plan: confirmed,
+            previous_version: component.installed_version,
+        })
+    }
 
+    async fn execute_prepared_update(
+        &self,
+        prepared: PreparedUpdate,
+        run_id: RunId,
+        cancellation: CancellationToken,
+    ) -> Result<ConfirmedUpdate, ApplicationError> {
+        let PreparedUpdate {
+            plan: confirmed,
+            previous_version,
+        } = prepared;
+        let plan = confirmed.plan();
         {
             let mut state = self.state.write().await;
             find_component_mut(&mut state.snapshot.tools, &plan.tool_id, &plan.component_id)?
@@ -759,7 +865,6 @@ impl ApplicationService {
                         error.retryable,
                     ),
                 };
-                state.plans.remove(&request.plan_id);
                 let saved = self.persist_tools(
                     &state.snapshot.tools,
                     state.snapshot.refreshed_at,
@@ -771,7 +876,6 @@ impl ApplicationService {
             }
         };
 
-        let previous_version = component.installed_version.clone();
         let (component_status, detected_version) = match execution.status {
             RunStatus::Succeeded => {
                 let (verification, detected) = self
@@ -851,7 +955,6 @@ impl ApplicationService {
                 installation.installed_version = detected_version;
             }
         }
-        state.plans.remove(&request.plan_id);
         let saved = self.persist_tools(
             &state.snapshot.tools,
             state.snapshot.refreshed_at,

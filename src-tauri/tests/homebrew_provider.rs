@@ -100,6 +100,48 @@ impl FakeBrew {
     }
 }
 
+#[tokio::test]
+async fn refresh_progress_reports_scan_packages_without_splitting_homebrew_batches() {
+    let fake = FakeBrew::new();
+    fake.write_info(installed_info());
+    fake.write_outdated(json!({"formulae": [], "casks": []}), 0);
+    let provider = fake.provider();
+    let mut scans = Vec::new();
+    let installations = provider
+        .scan_with_progress(&mut |event| scans.push(event))
+        .await
+        .unwrap();
+    assert_eq!(scans[0].total, None);
+    assert_eq!(scans.last().unwrap().completed, Some(installations.len()));
+    assert!(scans
+        .iter()
+        .any(|event| event.package_name.as_deref() == Some("shared")));
+    let mut progress = Vec::new();
+    provider
+        .check_updates_with_progress(&installations, &mut |event| progress.push(event))
+        .await
+        .unwrap();
+    assert_eq!(progress.len(), 2);
+    assert_eq!(progress[0].completed, Some(0));
+    assert_eq!(progress[1].completed, Some(installations.len()));
+    assert!(progress.iter().all(|event| event.package_name.is_none()));
+    let calls = fake.calls();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call.starts_with("[<list><--formula>"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call.starts_with("[<outdated><--json=v2>"))
+            .count(),
+        1
+    );
+}
+
 fn formatula_path(name: &str) -> PathBuf {
     PathBuf::from(format!("{name}.txt"))
 }

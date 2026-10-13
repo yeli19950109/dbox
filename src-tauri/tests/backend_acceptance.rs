@@ -10,9 +10,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chrono::Utc;
 use dbox_lib::api::{
-    ApiEvent, ApiService, BufferedExecutionEventSink, CancelDispositionDto, CancelRequestDto,
-    ConfirmRequestDto, MemoryApiEventEmitter, PreviewRequestDto, RefreshPhaseDto,
-    RefreshRequestDto, RefreshScopeDto, RunLogRequestDto, RunStateKindDto, UpdateSelectionDto,
+    ApiErrorCode, ApiEvent, ApiService, BufferedExecutionEventSink, CancelDispositionDto,
+    CancelRequestDto, ConfirmBatchOutcomeDto, ConfirmBatchRequestDto, ConfirmRequestDto,
+    MemoryApiEventEmitter, PreviewRequestDto, RefreshPhaseDto, RefreshRequestDto, RefreshScopeDto,
+    RefreshStageDto, RunLogRequestDto, RunStateKindDto, UpdateSelectionDto,
 };
 use dbox_lib::application::{
     ApplicationEnvironment, ApplicationService, ApplicationServiceOptions,
@@ -138,6 +139,10 @@ struct Fixture {
 
 impl Fixture {
     fn new(args: Vec<String>) -> Self {
+        Self::with_commands(vec![args], ApplicationServiceOptions::default())
+    }
+
+    fn with_commands(commands: Vec<Vec<String>>, options: ApplicationServiceOptions) -> Self {
         let temporary = TempDir::new().unwrap();
         let program = temporary.path().join("fake-command");
         fs::copy(
@@ -157,14 +162,21 @@ impl Fixture {
             8,
             Duration::from_millis(10),
         ));
-        let provider = AdvancingProvider {
-            id: ProviderId::new("acceptance").unwrap(),
-            program,
-            args,
-            scans: AtomicUsize::new(0),
-        };
         let mut registry = dbox_lib::providers::ProviderRegistry::new();
-        registry.register(Arc::new(provider)).unwrap();
+        for (index, args) in commands.into_iter().enumerate() {
+            let provider = AdvancingProvider {
+                id: ProviderId::new(if index == 0 {
+                    "acceptance".into()
+                } else {
+                    format!("z-acceptance-{index}")
+                })
+                .unwrap(),
+                program: program.clone(),
+                args,
+                scans: AtomicUsize::new(0),
+            };
+            registry.register(Arc::new(provider)).unwrap();
+        }
         let application = Arc::new(
             ApplicationService::new(
                 Arc::new(registry),
@@ -172,7 +184,7 @@ impl Fixture {
                 Arc::clone(&store),
                 CommandExecutor::new(Some(Arc::clone(&store)), sink, 4096),
                 Arc::new(FakeEnvironment),
-                ApplicationServiceOptions::default(),
+                options,
             )
             .unwrap(),
         );
@@ -185,6 +197,10 @@ impl Fixture {
     }
 
     async fn preview(&self) -> dbox_lib::api::UpdatePlanDto {
+        self.preview_all().await.remove(0)
+    }
+
+    async fn preview_all(&self) -> Vec<dbox_lib::api::UpdatePlanDto> {
         let snapshot = self
             .api
             .refresh(RefreshRequestDto {
@@ -193,20 +209,192 @@ impl Fixture {
             })
             .await
             .unwrap();
-        assert_eq!(snapshot.tools.len(), 1);
         self.api
             .preview(PreviewRequestDto {
-                selections: vec![UpdateSelectionDto {
-                    tool_id: snapshot.tools[0].id.clone(),
-                    component_id: "core".into(),
-                    strategy_id: Some(StrategyId::new("provider-default").unwrap().to_string()),
-                    target_version: None,
-                }],
+                selections: snapshot
+                    .tools
+                    .iter()
+                    .map(|tool| UpdateSelectionDto {
+                        tool_id: tool.id.clone(),
+                        component_id: "core".into(),
+                        strategy_id: Some(StrategyId::new("provider-default").unwrap().to_string()),
+                        target_version: None,
+                    })
+                    .collect(),
             })
             .await
             .unwrap()
-            .remove(0)
     }
+}
+
+#[tokio::test]
+async fn batch_continues_after_an_update_replaces_its_command_and_the_preview_expires() {
+    let gates = TempDir::new().unwrap();
+    let gate = gates.path().join("finish");
+    let fixture = Fixture::with_commands(
+        vec![
+            vec!["replace-self-gated".into(), gate.display().to_string()],
+            vec!["streams".into()],
+        ],
+        ApplicationServiceOptions {
+            plan_ttl: chrono::Duration::seconds(2),
+            ..Default::default()
+        },
+    );
+    let plans = fixture.preview_all().await;
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].command.args[0], "replace-self-gated");
+    let expires_at = chrono::DateTime::parse_from_rfc3339(&plans[1].expires_at).unwrap();
+    let request = ConfirmBatchRequestDto {
+        plans: plans
+            .iter()
+            .map(|plan| ConfirmRequestDto {
+                plan_id: plan.plan_id.clone(),
+                plan_hash: plan.plan_hash.clone(),
+            })
+            .collect(),
+    };
+    let api = fixture.api.clone();
+    let batch = tokio::spawn(async move { api.confirm_batch(request).await });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if fixture.emitter.events().iter().any(|event| matches!(event,
+                ApiEvent::RunOutput(output) if output.chunks.iter().any(|chunk| chunk.message.contains("fixture-started"))
+            )) { break; }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }).await.unwrap();
+    let remaining = (expires_at.with_timezone(&Utc) - Utc::now())
+        .to_std()
+        .unwrap_or_default();
+    tokio::time::sleep(remaining + Duration::from_millis(20)).await;
+    fs::write(gate, "release").unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(3), batch)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.outcomes.len(), 2);
+    for outcome in &response.outcomes {
+        assert!(
+            matches!(outcome, ConfirmBatchOutcomeDto::Ok { execution, .. } if execution.status == "succeeded")
+        );
+    }
+    assert!(
+        matches!(&response.outcomes[1], ConfirmBatchOutcomeDto::Ok { execution, .. }
+        if execution.output_tail.contains("replacement-command"))
+    );
+    assert_eq!(fixture.api.run_history().unwrap().runs.len(), 2);
+    // An accepted plan is consumed, even if it was waiting behind another command.
+    let replay = fixture
+        .api
+        .confirm(ConfirmRequestDto {
+            plan_id: plans[1].plan_id.clone(),
+            plan_hash: plans[1].plan_hash.clone(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(replay.code, ApiErrorCode::InvalidPlan);
+    assert!(replay.message.contains("already consumed"));
+}
+
+#[tokio::test]
+async fn invalid_later_plan_rejects_the_whole_batch_before_any_command_starts() {
+    let fixture = Fixture::with_commands(
+        vec![vec!["streams".into()], vec!["streams".into()]],
+        Default::default(),
+    );
+    let plans = fixture.preview_all().await;
+    let error = fixture
+        .api
+        .confirm_batch(ConfirmBatchRequestDto {
+            plans: vec![
+                ConfirmRequestDto {
+                    plan_id: plans[0].plan_id.clone(),
+                    plan_hash: plans[0].plan_hash.clone(),
+                },
+                ConfirmRequestDto {
+                    plan_id: plans[1].plan_id.clone(),
+                    plan_hash: "0".repeat(64),
+                },
+            ],
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ApiErrorCode::InvalidPlan);
+    assert!(fixture.api.run_history().unwrap().runs.is_empty());
+    assert!(!fixture
+        .emitter
+        .events()
+        .iter()
+        .any(|event| matches!(event, ApiEvent::RunState(_))));
+    // Failed validation does not consume otherwise valid plans.
+    fixture
+        .api
+        .confirm(ConfirmRequestDto {
+            plan_id: plans[0].plan_id.clone(),
+            plan_hash: plans[0].plan_hash.clone(),
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn command_changes_before_batch_confirmation_are_still_rejected() {
+    let fixture = Fixture::with_commands(
+        vec![vec!["streams".into()], vec!["streams".into()]],
+        Default::default(),
+    );
+    let plans = fixture.preview_all().await;
+    fs::write(
+        &plans[0].command.program,
+        "#!/bin/sh\necho unexpected-change\n",
+    )
+    .unwrap();
+    let error = fixture
+        .api
+        .confirm_batch(ConfirmBatchRequestDto {
+            plans: plans
+                .iter()
+                .map(|plan| ConfirmRequestDto {
+                    plan_id: plan.plan_id.clone(),
+                    plan_hash: plan.plan_hash.clone(),
+                })
+                .collect(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ApiErrorCode::InvalidPlan);
+    assert_eq!(error.details["reason"], "environment_changed");
+    assert!(fixture.api.run_history().unwrap().runs.is_empty());
+}
+
+#[tokio::test]
+async fn failed_command_does_not_stop_later_approved_updates() {
+    let fixture = Fixture::with_commands(
+        vec![vec!["fail".into()], vec!["streams".into()]],
+        Default::default(),
+    );
+    let plans = fixture.preview_all().await;
+    let response = fixture
+        .api
+        .confirm_batch(ConfirmBatchRequestDto {
+            plans: plans
+                .iter()
+                .map(|plan| ConfirmRequestDto {
+                    plan_id: plan.plan_id.clone(),
+                    plan_hash: plan.plan_hash.clone(),
+                })
+                .collect(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        matches!(&response.outcomes[0], ConfirmBatchOutcomeDto::Ok { execution, .. } if execution.status == "failed")
+    );
+    assert!(
+        matches!(&response.outcomes[1], ConfirmBatchOutcomeDto::Ok { execution, .. } if execution.status == "succeeded")
+    );
 }
 
 #[tokio::test]
@@ -267,6 +455,38 @@ async fn typed_api_completes_refresh_preview_confirm_post_check_history_chain() 
                 && progress.completed == Some(0)
                 && progress.total == Some(1)
     )));
+    let refresh_progress: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            ApiEvent::RefreshProgress(progress) => Some(progress),
+            _ => None,
+        })
+        .collect();
+    assert!(refresh_progress.iter().any(|progress| {
+        progress.stage == Some(RefreshStageDto::Probe)
+            && progress.item_completed.is_none()
+            && progress.item_total.is_none()
+            && progress.package_name.is_none()
+    }));
+    assert!(refresh_progress.iter().any(|progress| {
+        progress.stage == Some(RefreshStageDto::Scan)
+            && progress.item_completed == Some(1)
+            && progress.item_total == Some(1)
+    }));
+    assert!(refresh_progress.iter().any(|progress| {
+        progress.stage == Some(RefreshStageDto::CheckUpdates)
+            && progress.item_completed == Some(1)
+            && progress.item_total == Some(1)
+    }));
+    assert!(refresh_progress
+        .iter()
+        .filter(|progress| progress.phase == RefreshPhaseDto::Completed)
+        .all(|progress| {
+            progress.stage.is_none()
+                && progress.package_name.is_none()
+                && progress.item_completed.is_none()
+                && progress.item_total.is_none()
+        }));
     assert!(events
         .iter()
         .any(|event| matches!(event, ApiEvent::RunOutput(_))));

@@ -6,10 +6,33 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import { setTransportForTests } from "../api/transport";
 import { failedRun } from "../test/fixtures";
 import { createMockTransport, ok } from "../test/mockTransport";
+import { useRunsStore } from "../stores/runs";
 import RunsView from "./RunsView.vue";
 
 describe("RunsView accessibility", () => {
   beforeEach(() => setActivePinia(createPinia()));
+
+  it("follows the new run while a quick update is still preparing with existing history", async () => {
+    const mock = createMockTransport({ runHistory: vi.fn(() => ok({ runs: [failedRun("old-run")] })) });
+    setTransportForTests(mock.transport);
+    const runs = useRunsStore();
+    runs.startingUpdate = true;
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/runs", component: RunsView }] });
+    await router.push("/runs");
+    const wrapper = mount(RunsView, { global: { plugins: [router] } });
+    await flushPromises();
+    expect(wrapper.text()).toContain("正在准备更新计划");
+    expect(mock.transport.commands.runLog).not.toHaveBeenCalled();
+
+    runs.executing = true;
+    runs.applyState({
+      runId: "new-run", sequence: "1", timestamp: "2026-10-13T02:00:00Z",
+      state: { kind: "state_changed", status: "running" },
+    });
+    await flushPromises();
+    expect(wrapper.get(".live-run.active").text()).toContain("new-run");
+    wrapper.unmount();
+  });
 
   it("provides accessible retry/copy operations and an axe-clean status region", async () => {
     const run = failedRun();

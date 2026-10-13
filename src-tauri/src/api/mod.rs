@@ -26,6 +26,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             refresh,
             preview,
             confirm,
+            confirm_batch,
             cancel,
             run_history,
             run_log,

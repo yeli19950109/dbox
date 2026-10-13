@@ -105,6 +105,59 @@ fn request(installation: &Installation) -> ProviderUpdateRequest {
 }
 
 #[tokio::test]
+async fn refresh_progress_reports_scan_packages_and_concurrent_check_completion() {
+    let fake = FakeMise::new();
+    let inventory = json!({
+        "node": [fake.record("node", "22.0.0", Some("22"))],
+        "python": [fake.record("python", "3.13.0", Some("3.13"))]
+    });
+    fake.write_json("installed", inventory.clone());
+    fake.write_json("global", inventory);
+    fake.write_json("node", json!({"backend": "core:node"}));
+    fake.write_json("python", json!({"backend": "core:python"}));
+    fake.write("core_node@22.latest", "22.1.0\n");
+    fake.write("core_node@22.delay", "");
+    fake.write("core_python@3.13.fail", "");
+    let provider = fake.provider();
+    let mut scans = Vec::new();
+    let installations = provider
+        .scan_with_progress(&mut |progress| scans.push(progress))
+        .await
+        .unwrap();
+    assert_eq!(scans[0].completed, None);
+    assert!(scans.iter().any(|progress| {
+        progress.package_name.as_deref() == Some("node")
+            && progress.completed == Some(0)
+            && progress.total == Some(2)
+    }));
+    assert_eq!(scans.last().unwrap().completed, Some(2));
+
+    let mut progress = Vec::new();
+    let checks = provider
+        .check_updates_with_progress(&installations, &mut |event| progress.push(event))
+        .await
+        .unwrap();
+    assert_eq!(progress.len(), 3);
+    assert_eq!(progress[0].package_name, None);
+    assert_eq!(progress[0].completed, Some(0));
+    assert_eq!(progress[1].package_name.as_deref(), Some("core:python"));
+    assert_eq!(progress[1].completed, Some(1));
+    assert_eq!(progress[2].package_name.as_deref(), Some("core:node"));
+    assert_eq!(progress[2].completed, Some(2));
+    assert!(progress.iter().all(|event| event.total == Some(2)));
+    assert!(checks
+        .iter()
+        .any(|check| matches!(check.status, ComponentStatus::CheckFailed { .. })));
+    assert_eq!(
+        fake.calls()
+            .iter()
+            .filter(|call| call.starts_with("latest "))
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
 async fn probe_scan_check_plan_preserve_versions_backends_and_global_activation() {
     let fake = FakeMise::new();
     let node22 = fake.record("node", "22.0.0", Some("22"));

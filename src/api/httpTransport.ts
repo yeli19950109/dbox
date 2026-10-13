@@ -18,6 +18,7 @@ import type {
   ApiErrorDto,
   CancelResponseDto,
   ConfirmResponseDto,
+  ConfirmBatchResponseDto,
   ManifestDocumentDto,
   ManifestValidationDto,
   RefreshProgressEventDto,
@@ -203,6 +204,10 @@ const httpCommands = {
     // the stream carrying its first state/output events is actually open.
     if (eventStream) await waitForOpen(eventStream.source);
     return command<ConfirmResponseDto>("confirm", request);
+  },
+  confirmBatch: async (request: Parameters<typeof generatedCommands.confirmBatch>[0]) => {
+    if (eventStream) await waitForOpen(eventStream.source);
+    return command<ConfirmBatchResponseDto>("confirm_batch", request);
   },
   cancel: (request: Parameters<typeof generatedCommands.cancel>[0]) =>
     command<CancelResponseDto>("cancel", request),

@@ -3,10 +3,11 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h } from "vue";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { snapshotWithTools } from "../test/fixtures";
-import { createMockTransport } from "../test/mockTransport";
+import { snapshotWithTools, updatePlan } from "../test/fixtures";
+import { apiError, createMockTransport, ok } from "../test/mockTransport";
 import { setTransportForTests } from "../api/transport";
 import { useSnapshotStore } from "../stores/snapshot";
+import { useRunsStore } from "../stores/runs";
 import { mapToolRecords } from "../utils/presentation";
 import ToolCard from "../components/ToolCard.vue";
 import ToolsView from "./ToolsView.vue";
@@ -17,6 +18,7 @@ function testRouter() {
     routes: [
       { path: "/tools", name: "tools", component: ToolsView },
       { path: "/runs/confirm", name: "confirm", component: { template: "<div>confirm</div>" } },
+      { path: "/runs", name: "runs", component: { template: "<div>runs</div>" } },
     ],
   });
 }
@@ -178,7 +180,79 @@ describe("ToolsView", () => {
     wrapper.unmount();
   });
 
-  it("shows Provider-level refresh progress", async () => {
+  it("updates only eligible visible tools in one click without visiting confirmation", async () => {
+    const snapshot = snapshotWithTools(10);
+    snapshot.tools[0]!.hidden = true;
+    snapshot.tools[9]!.components[0]!.strategies[0]!.enabled = false;
+    const mock = createMockTransport({
+      snapshot: vi.fn(() => ok(snapshot)),
+      preview: vi.fn(() => ok([updatePlan()])),
+      confirmBatch: vi.fn(() => ok({ outcomes: [], snapshot })),
+    });
+    setTransportForTests(mock.transport);
+    useSnapshotStore().acceptSnapshot(snapshot);
+    const router = testRouter();
+    await router.push("/tools");
+    const wrapper = mount(ToolsView, { attachTo: document.body, global: { plugins: [router] } });
+    await flushPromises();
+    const button = wrapper.get('button[title="直接更新当前筛选结果中的所有可更新项"]');
+    expect(button.text()).toContain("2 项");
+    await wrapper.get('input[name="tool-provider"][value="npm"]').setValue(true);
+    expect(button.text()).toContain("1 项");
+    await button.trigger("click");
+    await flushPromises();
+
+    expect(mock.transport.commands.preview).toHaveBeenCalledExactlyOnceWith({ selections: [{
+      toolId: "npm:tool-6", componentId: "core", strategyId: "provider-default", targetVersion: null,
+    }] });
+    expect(mock.transport.commands.confirmBatch).toHaveBeenCalledTimes(1);
+    expect(router.currentRoute.value.name).toBe("runs");
+    wrapper.unmount();
+  });
+
+  it("updates an individual tool without selecting it first", async () => {
+    const mock = createMockTransport({
+      preview: vi.fn(() => ok([updatePlan()])),
+      confirmBatch: vi.fn(() => ok({ outcomes: [], snapshot: snapshotWithTools() })),
+    });
+    setTransportForTests(mock.transport);
+    const router = testRouter();
+    await router.push("/tools");
+    const wrapper = mount(ToolsView, { attachTo: document.body, global: { plugins: [router] } });
+    await flushPromises();
+    await wrapper.get('button[aria-label="更新 Shared CLI"]').trigger("click");
+    await flushPromises();
+    expect(mock.transport.commands.preview).toHaveBeenCalledExactlyOnceWith({ selections: [{
+      toolId: "npm:tool-0", componentId: "core", strategyId: "provider-default", targetVersion: null,
+    }] });
+    expect(mock.transport.commands.confirmBatch).toHaveBeenCalledTimes(1);
+    expect(router.currentRoute.value.name).toBe("runs");
+    wrapper.unmount();
+  });
+
+  it("keeps the selected-update preview available and surfaces preparation failures", async () => {
+    const mock = createMockTransport({ preview: vi.fn(() => apiError("unavailable", "更新服务暂不可用")) });
+    setTransportForTests(mock.transport);
+    const router = testRouter();
+    await router.push("/tools");
+    const wrapper = mount(ToolsView, { attachTo: document.body, global: { plugins: [router] } });
+    await flushPromises();
+    await wrapper.get('input[aria-label*="全部更新"]').setValue(true);
+    expect(wrapper.get(".selection-bar").text()).toContain("更新所选");
+    const preview = wrapper.get(".selection-bar .button.secondary");
+    await preview.trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain("更新服务暂不可用");
+    expect(router.currentRoute.value.name).toBe("tools");
+    expect(mock.transport.commands.confirmBatch).not.toHaveBeenCalled();
+    useRunsStore().startingUpdate = true;
+    await flushPromises();
+    expect(wrapper.get(".tool-card__update").attributes("disabled")).toBeDefined();
+    expect(preview.attributes("disabled")).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it("shows completed source counts while probing a Provider", async () => {
     const mock = createMockTransport();
     setTransportForTests(mock.transport);
     const store = useSnapshotStore();
@@ -192,6 +266,10 @@ describe("ToolsView", () => {
       providerId: "npm-global",
       completed: 1,
       total: 2,
+      stage: "probe",
+      packageName: null,
+      itemCompleted: null,
+      itemTotal: null,
     });
     const router = testRouter();
     await router.push("/tools");
@@ -203,11 +281,38 @@ describe("ToolsView", () => {
     });
     await flushPromises();
 
-    expect(wrapper.get(".refresh-progress").text()).toContain("正在检查 npm-global");
-    expect(wrapper.get(".refresh-progress").text()).toContain("2 / 2");
+    expect(wrapper.get(".refresh-progress").text()).toContain("正在检查 npm");
+    expect(wrapper.get(".refresh-progress__count").text()).toBe("1 / 2");
     const progressbar = wrapper.get('[role="progressbar"]');
     expect(progressbar.attributes("aria-valuenow")).toBe("1");
     expect(progressbar.attributes("aria-valuemax")).toBe("2");
+    wrapper.unmount();
+  });
+
+  it("shows real software progress and uses batch messaging when individual results are unavailable", async () => {
+    setTransportForTests(createMockTransport().transport);
+    const store = useSnapshotStore();
+    store.acceptSnapshot(snapshotWithTools());
+    store.refreshing = true;
+    const event = {
+      requestId: "refresh-1", sequence: "1", phase: "progress" as const, message: "checking node",
+      providerId: "mise", completed: 1, total: 3, stage: "check_updates" as const,
+      packageName: "node", itemCompleted: 2, itemTotal: 5,
+    };
+    store.applyRefreshProgress(event);
+    const router = testRouter();
+    await router.push("/tools");
+    const wrapper = mount(ToolsView, { attachTo: document.body, global: { plugins: [router] } });
+    await flushPromises();
+    expect(wrapper.get(".refresh-progress").text()).toContain("检查更新 · node");
+    expect(wrapper.get(".refresh-progress__count").text()).toBe("2 / 5");
+    expect(wrapper.get('[role="progressbar"]').attributes("aria-valuenow")).toBe("2");
+    expect(wrapper.get('[role="progressbar"]').attributes("aria-valuemax")).toBe("5");
+    expect(wrapper.get('[role="progressbar"] > span').attributes("style")).toContain("40%");
+    store.applyRefreshProgress({ ...event, sequence: "2", packageName: null, itemCompleted: 0 });
+    await flushPromises();
+    expect(wrapper.get(".refresh-progress").text()).toContain("正在批量查询版本");
+    expect(wrapper.get('[role="progressbar"] > span').attributes("style")).toContain("0%");
     wrapper.unmount();
   });
 });

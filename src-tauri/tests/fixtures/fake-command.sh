@@ -13,6 +13,17 @@ case "$mode" in
     while [ ! -f "$2" ]; do sleep 0.02; done
     printf 'fixture-finished\n' >&2
     ;;
+  quiet-gated)
+    while [ ! -f "$2" ]; do sleep 0.02; done
+    printf 'fixture-finished\n'
+    ;;
+  replace-self-gated)
+    printf 'fixture-started\n'
+    while [ ! -f "$2" ]; do sleep 0.02; done
+    printf '#!/bin/sh\nprintf "replacement-command\\n"\n' > "$0.next"
+    chmod +x "$0.next"
+    mv "$0.next" "$0"
+    ;;
   fail)
     printf 'command failed\n' >&2
     exit 7

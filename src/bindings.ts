@@ -9,6 +9,7 @@ export const commands = {
 	refresh: (request: RefreshRequestDto) => typedError<SnapshotDto, ApiErrorDto>(__TAURI_INVOKE("refresh", { request })),
 	preview: (request: PreviewRequestDto) => typedError<UpdatePlanDto[], ApiErrorDto>(__TAURI_INVOKE("preview", { request })),
 	confirm: (request: ConfirmRequestDto) => typedError<ConfirmResponseDto, ApiErrorDto>(__TAURI_INVOKE("confirm", { request })),
+	confirmBatch: (request: ConfirmBatchRequestDto) => typedError<ConfirmBatchResponseDto, ApiErrorDto>(__TAURI_INVOKE("confirm_batch", { request })),
 	cancel: (request: CancelRequestDto) => typedError<CancelResponseDto, ApiErrorDto>(__TAURI_INVOKE("cancel", { request })),
 	runHistory: () => typedError<RunHistoryDto, ApiErrorDto>(__TAURI_INVOKE("run_history")),
 	runLog: (request: RunLogRequestDto) => typedError<RunLogDto, ApiErrorDto>(__TAURI_INVOKE("run_log", { request })),
@@ -136,6 +137,17 @@ export type ComponentStatusDto = {
 	status: string,
 	reason: StatusReasonDto | null,
 	verification: VerificationStatusDto | null,
+};
+
+export type ConfirmBatchOutcomeDto = { status: "ok"; planId: string; execution: ExecutionResultDto } | { status: "error"; planId: string; error: ApiErrorDto };
+
+export type ConfirmBatchRequestDto = {
+	plans: ConfirmRequestDto[],
+};
+
+export type ConfirmBatchResponseDto = {
+	outcomes: ConfirmBatchOutcomeDto[],
+	snapshot: SnapshotDto,
 };
 
 export type ConfirmExtensionRequest = {
@@ -384,6 +396,10 @@ export type RefreshProgressEventDto = {
 	providerId: string | null,
 	completed: number | null,
 	total: number | null,
+	stage?: RefreshStageDto | null,
+	packageName?: string | null,
+	itemCompleted?: number | null,
+	itemTotal?: number | null,
 };
 
 export type RefreshRequestDto = {
@@ -392,6 +408,8 @@ export type RefreshRequestDto = {
 };
 
 export type RefreshScopeDto = { scope: "all" } | { scope: "provider"; providerId: string } | { scope: "tool"; toolId: string };
+
+export type RefreshStageDto = "probe" | "scan" | "check_updates";
 
 export type ResourceKind = "skill" | "mcp";
 

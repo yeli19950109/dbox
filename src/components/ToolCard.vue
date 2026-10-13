@@ -44,6 +44,16 @@
       </span>
       <span class="tool-card__disclosure" aria-hidden="true">›</span>
     </button>
+    <button
+      v-if="updateable.length"
+      class="button secondary tool-card__update"
+      type="button"
+      :disabled="updateDisabled"
+      :aria-label="`更新 ${summaryName}`"
+      @click="$emit('update')"
+    >
+      更新
+    </button>
   </article>
 </template>
 
@@ -55,11 +65,13 @@ import { miseInstallationLabel, providerLabel, updateableComponents } from "../u
 const props = defineProps<{
   record: ToolRecord;
   selected: ReadonlySet<string>;
+  updateDisabled?: boolean;
 }>();
 
 defineEmits<{
   details: [event: MouseEvent];
   "select-updates": [];
+  update: [];
 }>();
 
 const updateable = computed(() => updateableComponents(props.record.tool));
@@ -95,3 +107,16 @@ function statusLabel(status: string): string {
   return labels[status] ?? status;
 }
 </script>
+
+<style scoped>
+.tool-card:has(.tool-card__update) {
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+}
+
+.tool-card__update {
+  min-height: 30px;
+  padding: 4px 10px;
+  margin-left: 4px;
+  font-size: 12px;
+}
+</style>

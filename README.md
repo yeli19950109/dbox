@@ -20,6 +20,24 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run build
 ```
 
+## Application version
+
+Use the root `package.json` version as the source of truth. After editing it, run:
+
+```sh
+npm run version:sync
+npm run version:check
+```
+
+The sync command updates `package-lock.json` (both root version fields),
+`src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the application entry in
+`src-tauri/Cargo.lock`. Dependency versions are preserved. The check command exits
+with a nonzero status if any version is out of sync, without modifying files.
+
+Tauri has no application version bump command in its [official CLI](https://v2.tauri.app/reference/cli/).
+Its [version config](https://v2.tauri.app/reference/config/#version) can reference
+`package.json`, but that does not synchronize the Cargo manifest or lockfiles.
+
 ## Local macOS package
 
 Build a DMG for the current Mac architecture with Tauri's bundler:

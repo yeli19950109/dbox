@@ -38,6 +38,15 @@ pub async fn confirm(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn confirm_batch(
+    state: State<'_, ApiState>,
+    request: ConfirmBatchRequestDto,
+) -> Result<ConfirmBatchResponseDto, ApiErrorDto> {
+    state.service().confirm_batch(request).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn cancel(
     state: State<'_, ApiState>,
     request: CancelRequestDto,

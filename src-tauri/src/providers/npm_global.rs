@@ -18,8 +18,9 @@ use crate::domain::{
 use crate::version::{ComponentStatus, StatusReason, VersionValue};
 
 use super::{
-    ProviderCapabilities, ProviderError, ProviderOperation, ProviderStatus, ProviderUpdatePlan,
-    ProviderUpdateRequest, Recoverability, ToolProvider, UpdateCheck,
+    ProviderCapabilities, ProviderError, ProviderOperation, ProviderProgress,
+    ProviderProgressCallback, ProviderStatus, ProviderUpdatePlan, ProviderUpdateRequest,
+    Recoverability, ToolProvider, UpdateCheck,
 };
 
 pub const NPM_GLOBAL_PROVIDER_ID: &str = "npm-global";
@@ -546,6 +547,14 @@ impl ToolProvider for NpmGlobalProvider {
     }
 
     async fn scan(&self) -> Result<Vec<Installation>, ProviderError> {
+        self.scan_with_progress(&mut |_| {}).await
+    }
+
+    async fn scan_with_progress(
+        &self,
+        on_progress: &mut ProviderProgressCallback<'_>,
+    ) -> Result<Vec<Installation>, ProviderError> {
+        on_progress(ProviderProgress::default());
         self.reset_diagnostics();
         let environment = self
             .load_environment(ProviderOperation::Scan, false)
@@ -558,7 +567,14 @@ impl ToolProvider for NpmGlobalProvider {
             .await?;
         let dependencies = parse_list_output(&self.id, output)?;
         let mut installations = Vec::with_capacity(dependencies.len());
-        for (package_name, entry) in dependencies {
+        let total = dependencies.len();
+        on_progress(ProviderProgress::items(None, 0, total));
+        for (index, (package_name, entry)) in dependencies.into_iter().enumerate() {
+            on_progress(ProviderProgress::items(
+                Some(package_name.clone()),
+                index,
+                total,
+            ));
             match self
                 .installation_from_entry(&environment, package_name.clone(), entry)
                 .await
@@ -566,13 +582,18 @@ impl ToolProvider for NpmGlobalProvider {
                 Ok(installation) => installations.push(installation),
                 Err(error) => {
                     self.record_diagnostic(NpmDiagnostic {
-                        package: Some(package_name),
+                        package: Some(package_name.clone()),
                         code: "invalid_package".into(),
                         summary: error.summary,
                         recoverability: error.recoverability,
                     });
                 }
             }
+            on_progress(ProviderProgress::items(
+                Some(package_name),
+                index + 1,
+                total,
+            ));
         }
         installations.sort_by(|left, right| left.package.name.cmp(&right.package.name));
         Ok(installations)
@@ -582,6 +603,16 @@ impl ToolProvider for NpmGlobalProvider {
         &self,
         installations: &[Installation],
     ) -> Result<Vec<UpdateCheck>, ProviderError> {
+        self.check_updates_with_progress(installations, &mut |_| {})
+            .await
+    }
+
+    async fn check_updates_with_progress(
+        &self,
+        installations: &[Installation],
+        on_progress: &mut ProviderProgressCallback<'_>,
+    ) -> Result<Vec<UpdateCheck>, ProviderError> {
+        on_progress(ProviderProgress::items(None, 0, installations.len()));
         let mut checks = vec![None; installations.len()];
         let mut pending = Vec::new();
         for (index, installation) in installations.iter().enumerate() {
@@ -602,6 +633,14 @@ impl ToolProvider for NpmGlobalProvider {
             }
         }
 
+        let mut completed = installations.len() - pending.len();
+        if completed > 0 {
+            on_progress(ProviderProgress::items(
+                None,
+                completed,
+                installations.len(),
+            ));
+        }
         let mut tasks = JoinSet::new();
         for chunk in pending.chunks(self.options.update_batch_size) {
             let provider = self.clone();
@@ -611,9 +650,21 @@ impl ToolProvider for NpmGlobalProvider {
         while let Some(result) = tasks.join_next().await {
             match result {
                 Ok(results) => {
+                    let batch_size = results.len();
+                    let package_name = if batch_size == 1 {
+                        Some(installations[results[0].0].package.name.clone())
+                    } else {
+                        None
+                    };
                     for (index, check) in results {
                         checks[index] = Some(check);
                     }
+                    completed += batch_size;
+                    on_progress(ProviderProgress::items(
+                        package_name,
+                        completed,
+                        installations.len(),
+                    ));
                 }
                 Err(error) => {
                     return Err(ProviderError::new(
@@ -698,6 +749,9 @@ impl ToolProvider for NpmGlobalProvider {
             args: vec![
                 "install".into(),
                 "--global".into(),
+                // Piped npm output otherwise stays quiet until warnings or completion.
+                "--loglevel=info".into(),
+                "--foreground-scripts".into(),
                 "--".into(),
                 package_spec,
             ],

@@ -20,6 +20,14 @@ pub enum RefreshPhaseDto {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum RefreshStageDto {
+    Probe,
+    Scan,
+    CheckUpdates,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
 #[serde(rename_all = "camelCase")]
 #[tauri_specta(event_name = "refresh-progress")]
@@ -31,6 +39,14 @@ pub struct RefreshProgressEventDto {
     pub provider_id: Option<String>,
     pub completed: Option<u32>,
     pub total: Option<u32>,
+    #[serde(default)]
+    pub stage: Option<RefreshStageDto>,
+    #[serde(default)]
+    pub package_name: Option<String>,
+    #[serde(default)]
+    pub item_completed: Option<u32>,
+    #[serde(default)]
+    pub item_total: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -331,5 +347,28 @@ fn output_stream(stream: OutputStream) -> RunOutputStreamDto {
         OutputStream::Stdout => RunOutputStreamDto::Stdout,
         OutputStream::Stderr => RunOutputStreamDto::Stderr,
         OutputStream::System => RunOutputStreamDto::System,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refresh_events_accept_legacy_payloads_without_item_progress() {
+        let event: RefreshProgressEventDto = serde_json::from_value(serde_json::json!({
+            "requestId": "refresh",
+            "sequence": "1",
+            "phase": "progress",
+            "message": "checking homebrew",
+            "providerId": "homebrew",
+            "completed": 0,
+            "total": 3
+        }))
+        .unwrap();
+        assert_eq!(event.stage, None);
+        assert_eq!(event.package_name, None);
+        assert_eq!(event.item_completed, None);
+        assert_eq!(event.item_total, None);
     }
 }

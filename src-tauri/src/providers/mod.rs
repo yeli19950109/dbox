@@ -167,6 +167,27 @@ pub struct ProviderUpdatePlan {
     pub args: Vec<String>,
 }
 
+/// Progress within one provider operation. Counts describe completed work, including
+/// failed checks, and are only set once the operation knows its inventory size.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProviderProgress {
+    pub package_name: Option<String>,
+    pub completed: Option<usize>,
+    pub total: Option<usize>,
+}
+
+impl ProviderProgress {
+    pub fn items(package_name: Option<String>, completed: usize, total: usize) -> Self {
+        Self {
+            package_name,
+            completed: Some(completed),
+            total: Some(total),
+        }
+    }
+}
+
+pub type ProviderProgressCallback<'a> = dyn FnMut(ProviderProgress) + Send + 'a;
+
 #[async_trait]
 pub trait ToolProvider: Send + Sync {
     fn id(&self) -> ProviderId;
@@ -177,10 +198,39 @@ pub trait ToolProvider: Send + Sync {
 
     async fn scan(&self) -> Result<Vec<Installation>, ProviderError>;
 
+    async fn scan_with_progress(
+        &self,
+        on_progress: &mut ProviderProgressCallback<'_>,
+    ) -> Result<Vec<Installation>, ProviderError> {
+        on_progress(ProviderProgress::default());
+        let installations = self.scan().await?;
+        on_progress(ProviderProgress::items(
+            None,
+            installations.len(),
+            installations.len(),
+        ));
+        Ok(installations)
+    }
+
     async fn check_updates(
         &self,
         installations: &[Installation],
     ) -> Result<Vec<UpdateCheck>, ProviderError>;
+
+    async fn check_updates_with_progress(
+        &self,
+        installations: &[Installation],
+        on_progress: &mut ProviderProgressCallback<'_>,
+    ) -> Result<Vec<UpdateCheck>, ProviderError> {
+        on_progress(ProviderProgress::items(None, 0, installations.len()));
+        let checks = self.check_updates(installations).await?;
+        on_progress(ProviderProgress::items(
+            None,
+            installations.len(),
+            installations.len(),
+        ));
+        Ok(checks)
+    }
 
     async fn plan_update(
         &self,

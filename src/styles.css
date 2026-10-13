@@ -1567,6 +1567,13 @@ input[type="checkbox"] {
   scrollbar-color: var(--line-strong) transparent;
 }
 
+.log-empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .log-line {
   min-height: 28px;
   display: grid;

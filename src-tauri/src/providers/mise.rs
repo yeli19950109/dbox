@@ -23,8 +23,9 @@ use crate::domain::{
 use crate::version::{ComponentStatus, StatusReason, VersionValue};
 
 use super::{
-    ProviderCapabilities, ProviderError, ProviderOperation, ProviderStatus, ProviderUpdatePlan,
-    ProviderUpdateRequest, Recoverability, ToolProvider, UpdateCheck,
+    ProviderCapabilities, ProviderError, ProviderOperation, ProviderProgress,
+    ProviderProgressCallback, ProviderStatus, ProviderUpdatePlan, ProviderUpdateRequest,
+    Recoverability, ToolProvider, UpdateCheck,
 };
 
 pub const MISE_PROVIDER_ID: &str = "mise";
@@ -396,6 +397,14 @@ impl ToolProvider for MiseProvider {
     }
 
     async fn scan(&self) -> Result<Vec<Installation>, ProviderError> {
+        self.scan_with_progress(&mut |_| {}).await
+    }
+
+    async fn scan_with_progress(
+        &self,
+        on_progress: &mut ProviderProgressCallback<'_>,
+    ) -> Result<Vec<Installation>, ProviderError> {
+        on_progress(ProviderProgress::default());
         self.ensure_probed().await?;
         let operation = ProviderOperation::Scan;
         let installed: Listing = self
@@ -417,7 +426,9 @@ impl ToolProvider for MiseProvider {
                 }
             }
         }
-        for (tool, records) in inventory {
+        let total = inventory.len();
+        on_progress(ProviderProgress::items(None, 0, total));
+        for (index, (tool, records)) in inventory.into_iter().enumerate() {
             if !valid_tool(&tool) {
                 return Err(self.error(
                     operation,
@@ -425,6 +436,7 @@ impl ToolProvider for MiseProvider {
                     "mise returned an invalid tool name",
                 ));
             }
+            on_progress(ProviderProgress::items(Some(tool.clone()), index, total));
             let metadata: Result<ToolInfo, _> =
                 self.json(operation, &["tool", "--json", "--", &tool]).await;
             let (backend, metadata_error) = match metadata {
@@ -522,6 +534,7 @@ impl ToolProvider for MiseProvider {
                     ));
                 }
             }
+            on_progress(ProviderProgress::items(Some(tool), index + 1, total));
         }
         let installations = entries
             .values()
@@ -539,6 +552,16 @@ impl ToolProvider for MiseProvider {
         &self,
         installations: &[Installation],
     ) -> Result<Vec<UpdateCheck>, ProviderError> {
+        self.check_updates_with_progress(installations, &mut |_| {})
+            .await
+    }
+
+    async fn check_updates_with_progress(
+        &self,
+        installations: &[Installation],
+        on_progress: &mut ProviderProgressCallback<'_>,
+    ) -> Result<Vec<UpdateCheck>, ProviderError> {
+        on_progress(ProviderProgress::items(None, 0, installations.len()));
         let mut tasks = JoinSet::new();
         for (index, installation) in installations.iter().enumerate() {
             let provider = self.clone();
@@ -571,6 +594,11 @@ impl ToolProvider for MiseProvider {
                 )
             })?;
             checks.insert(index, check);
+            on_progress(ProviderProgress::items(
+                Some(installations[index].package.name.clone()),
+                checks.len(),
+                installations.len(),
+            ));
         }
         Ok(checks.into_values().collect())
     }

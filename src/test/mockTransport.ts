@@ -63,6 +63,7 @@ export function createMockTransport(
     refresh: vi.fn(() => ok(snapshot)),
     preview: vi.fn(() => ok([])),
     confirm: vi.fn(),
+    confirmBatch: vi.fn(),
     cancel: vi.fn((request) =>
       ok({ runId: request.runId, disposition: "cancellation_requested" as const }),
     ),

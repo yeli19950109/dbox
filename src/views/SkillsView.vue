@@ -29,7 +29,10 @@
     </nav>
     <OperationPanel resource="skill" />
     <fieldset :disabled="locked" class="extension-fieldset">
-      <div class="extension-panel extension-toolbar">
+      <div
+        v-if="tab !== 'settings'"
+        class="extension-panel extension-toolbar"
+      >
         <label
           >目标应用<select v-model="target">
             <option value="">全部应用</option>
@@ -55,10 +58,9 @@
         >
       </div>
       <template v-if="tab === 'installed'">
-        <div class="extension-toolbar">
-          <label class="search-field"
-            ><span class="sr-only">搜索已安装 Skill</span
-            ><input
+        <div class="extension-toolbar skills-filters">
+          <label class="skills-keyword-field"
+            >关键字<input
               v-model="query"
               type="search"
               placeholder="搜索名称、描述或来源" /></label
@@ -251,12 +253,13 @@
           </button>
         </form>
         <form
-          class="extension-panel extension-toolbar"
+          class="extension-panel extension-toolbar skills-remote-search"
           @submit.prevent="store.search(remoteQuery)"
         >
           <label
             >skills.sh 搜索<input
               v-model="remoteQuery"
+              type="search"
               required
               placeholder="搜索公开 Skill" /></label
           ><button class="button secondary" :disabled="store.discovering">
@@ -422,7 +425,7 @@
           </div>
         </article>
       </template>
-      <template v-else>
+      <template v-else-if="tab === 'backups'">
         <p>
           备份保留原内容、来源和应用状态；恢复也会检查当前文件是否发生变化。
         </p>
@@ -454,6 +457,12 @@
         </article>
         <p v-if="!store.backups.length">暂无备份。</p>
       </template>
+      <AgentPaths
+        v-else-if="tab === 'settings'"
+        :targets="store.targets"
+        open
+        @changed="store.load"
+      />
     </fieldset>
     <div v-if="store.discovering" class="inline-warning" role="status">
       正在读取来源…<button class="text-button" @click="store.cancelRequest">
@@ -468,7 +477,6 @@
     >
       {{ diagnostic.targetId }}：{{ diagnostic.message }}
     </p>
-    <AgentPaths :targets="store.targets" @changed="store.load" />
   </div>
 </template>
 <script setup lang="ts">
@@ -494,6 +502,7 @@ const tabs = [
   { id: "sources", label: "来源" },
   { id: "imports", label: "导入已有安装" },
   { id: "backups", label: "备份恢复" },
+  { id: "settings", label: "设置" },
 ];
 const tab = ref("installed"),
   target = ref(""),
@@ -612,3 +621,21 @@ onMounted(() => {
 });
 onBeforeUnmount(() => store.disconnectEvents());
 </script>
+
+<style scoped>
+.skills-filters,
+.skills-remote-search {
+  align-items: flex-end;
+}
+
+.skills-keyword-field {
+  flex: 1;
+  min-width: min(220px, 100%);
+}
+
+.skills-remote-search > .button {
+  align-self: flex-end;
+  min-height: 39px;
+  height: 39px;
+}
+</style>
