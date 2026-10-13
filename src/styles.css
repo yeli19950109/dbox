@@ -1567,6 +1567,12 @@ input[type="checkbox"] {
   scrollbar-color: var(--line-strong) transparent;
 }
 
+.log-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .log-empty {
   margin: 0;
   padding: 18px 14px;
@@ -1600,7 +1606,7 @@ input[type="checkbox"] {
 }
 
 .log-line[data-stream="stderr"] .log-line__stream {
-  color: var(--danger);
+  color: var(--muted);
 }
 
 .log-line[data-stream="system"] .log-line__stream {

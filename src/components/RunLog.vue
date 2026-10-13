@@ -5,31 +5,43 @@
         <p class="eyebrow">Live output</p>
         <h2>输出</h2>
       </div>
-      <span>{{ lines.length }} 条</span>
+      <div class="log-header-actions">
+        <button
+          v-if="hasMergedProgress"
+          class="text-button"
+          type="button"
+          :aria-expanded="showFullOutput"
+          @click="showFullOutput = !showFullOutput"
+        >{{ showFullOutput ? "合并进度" : "展开进度" }}</button>
+        <span>{{ displayedLines.length }} 条</span>
+      </div>
     </header>
     <div
       ref="scrollElement"
       class="log-viewport"
       role="log"
       aria-live="polite"
-      aria-relevant="additions"
+      aria-relevant="additions text"
       tabindex="0"
       data-testid="log-viewport"
     >
-      <p v-if="!lines.length" class="log-empty">{{ emptyMessage }}</p>
+      <p v-if="!displayedLines.length" class="log-empty">{{ emptyMessage }}</p>
       <div v-else class="virtual-list__sizer" :style="{ height: `${virtualizer.getTotalSize()}px` }">
         <div
           v-for="virtualRow in virtualRows"
-          :key="lines[virtualRow.index]?.sequence"
+          :key="displayedLines[virtualRow.index]?.displayKey"
           :ref="measureRow"
           :data-index="virtualRow.index"
           class="log-line virtual-list__row"
-          :data-stream="lines[virtualRow.index]?.stream"
+          :data-stream="displayedLines[virtualRow.index]?.stream"
           :style="{ transform: `translateY(${virtualRow.start}px)` }"
         >
-          <span class="log-line__sequence">{{ lines[virtualRow.index]?.sequence }}</span>
-          <span class="log-line__stream">{{ lines[virtualRow.index]?.stream }}</span>
-          <pre>{{ lines[virtualRow.index]?.message }}</pre>
+          <span class="log-line__sequence">{{ displayedLines[virtualRow.index]?.sequence }}</span>
+          <span
+            class="log-line__stream"
+            :title="displayedLines[virtualRow.index]?.stream === 'stderr' ? '诊断输出通道，不代表运行失败' : undefined"
+          >{{ displayedLines[virtualRow.index]?.stream }}</span>
+          <pre>{{ displayedLines[virtualRow.index]?.message }}</pre>
         </div>
       </div>
     </div>
@@ -40,6 +52,7 @@
 import { computed, nextTick, ref, watch, type ComponentPublicInstance } from "vue";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import type { DisplayLogLine } from "../stores/runs";
+import { compactProgressLines } from "../utils/progressLog";
 
 const props = defineProps<{
   lines: DisplayLogLine[];
@@ -48,6 +61,12 @@ const props = defineProps<{
 }>();
 const scrollElement = ref<HTMLElement | null>(null);
 const following = ref(true);
+const showFullOutput = ref(false);
+const compactedLines = computed(() => compactProgressLines(props.lines));
+const hasMergedProgress = computed(() => compactedLines.value.some((line) => (line.mergedFrames ?? 1) > 1));
+const displayedLines = computed(() => showFullOutput.value
+  ? props.lines.map((line) => ({ ...line, displayKey: `${line.sequence}:0` }))
+  : compactedLines.value);
 const emptyMessage = computed(() => {
   if (props.status === "queued") return "正在排队，命令启动后会显示执行详情。";
   if (props.status === "running") return "命令正在运行，等待输出…";
@@ -56,8 +75,8 @@ const emptyMessage = computed(() => {
 
 const virtualizer = useVirtualizer(
   computed(() => ({
-    count: props.lines.length,
-    getItemKey: (index: number) => props.lines[index]!.sequence,
+    count: displayedLines.value.length,
+    getItemKey: (index: number) => displayedLines.value[index]!.displayKey,
     getScrollElement: () => scrollElement.value,
     estimateSize: () => 28,
     overscan: 12,
@@ -71,10 +90,10 @@ function measureRow(element: Element | ComponentPublicInstance | null): void {
 }
 
 watch(
-  () => props.revision,
+  [() => props.revision, showFullOutput],
   () => {
-    if (!following.value || props.lines.length === 0) return;
-    void nextTick(() => virtualizer.value.scrollToIndex(props.lines.length - 1, { align: "end" }));
+    if (!following.value || displayedLines.value.length === 0) return;
+    void nextTick(() => virtualizer.value.scrollToIndex(displayedLines.value.length - 1, { align: "end" }));
   },
 );
 
