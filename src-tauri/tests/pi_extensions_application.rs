@@ -53,6 +53,10 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_mise_core(false)
+    }
+
+    fn with_mise_core(mise_core: bool) -> Self {
         let temporary = TempDir::new().unwrap();
         let root = temporary.path().join("Pi fixture with spaces");
         let agent_dir = root.join("agent");
@@ -83,10 +87,16 @@ impl Fixture {
         .unwrap();
 
         let pi = root.join("pi");
+        let pi_program = if mise_core {
+            root.join("mise")
+        } else {
+            pi.clone()
+        };
         write_program(
-            &pi,
+            &pi_program,
             r##"#!/bin/sh
 set -eu
+[ "$(basename -- "$0")" = pi ] || exit 65
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 if [ "$#" -eq 1 ] && [ "$1" = "--version" ]; then
   printf '%s\n' '1.2.0'
@@ -115,6 +125,11 @@ fi
 printf '%s\n' 'Updated fixture extension'
 "##,
         );
+        if mise_core {
+            // Like a real mise shim, dispatch depends on argv[0]. Resolving this
+            // symlink to its target before execution would invoke mise itself.
+            std::os::unix::fs::symlink(&pi_program, &pi).unwrap();
+        }
         let npm = root.join("npm");
         write_program(
             &npm,
@@ -136,15 +151,23 @@ esac
 "##,
         );
 
+        let (provider_id, package_kind, package_name) = if mise_core {
+            ("mise", PackageKind::Mise, "aqua:earendil-works/pi")
+        } else {
+            (
+                "npm-global",
+                PackageKind::NpmGlobal,
+                "@earendil-works/pi-coding-agent",
+            )
+        };
         let mut pi_core = Installation::new(
-            ProviderId::new("npm-global").unwrap(),
-            PackageCoordinate::new(PackageKind::NpmGlobal, "@earendil-works/pi-coding-agent")
-                .unwrap(),
+            ProviderId::new(provider_id).unwrap(),
+            PackageCoordinate::new(package_kind, package_name).unwrap(),
             InstallationScope::Global,
         )
         .unwrap();
         pi_core.installed_version = Some(VersionValue::new("1.2.0"));
-        let npm_global = FakeProvider::new(ProviderId::new("npm-global").unwrap())
+        let core_provider = FakeProvider::new(ProviderId::new(provider_id).unwrap())
             .with_scan_result(Ok(vec![pi_core.clone()]))
             .with_check_result(Ok(vec![UpdateCheck {
                 installation_id: pi_core.id.clone(),
@@ -154,7 +177,7 @@ esac
                 status: ComponentStatus::UpToDate,
             }]));
         let mut registry = ProviderRegistry::new();
-        registry.register(Arc::new(npm_global)).unwrap();
+        registry.register(Arc::new(core_provider)).unwrap();
         registry
             .register(Arc::new(PiExtensionsProvider::new(&pi, &npm, &agent_dir)))
             .unwrap();
@@ -191,7 +214,15 @@ fn write_program(path: &Path, source: &str) {
 
 #[tokio::test]
 async fn pi_extension_update_is_independent_of_core_and_verifies_its_own_version() {
-    let fixture = Fixture::new();
+    verify_extension_update(Fixture::new()).await;
+}
+
+#[tokio::test]
+async fn mise_pi_shim_updates_extensions_without_updating_the_core() {
+    verify_extension_update(Fixture::with_mise_core(true)).await;
+}
+
+async fn verify_extension_update(fixture: Fixture) {
     let snapshot = fixture
         .service
         .refresh_tools(RefreshRequest::all())

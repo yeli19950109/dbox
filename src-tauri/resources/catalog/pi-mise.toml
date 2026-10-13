@@ -1,0 +1,31 @@
+schema_version = 1
+id = "pi-mise"
+display_name = "Pi"
+description = "Pi core managed by mise; npm extension packages are managed by the pi-extensions provider"
+categories = ["agent", "tui"]
+homepage = "https://pi.dev"
+
+[[installations]]
+id = "aqua"
+provider_id = "mise"
+kind = "mise"
+package = "aqua:earendil-works/pi"
+
+[[installations]]
+id = "github"
+provider_id = "mise"
+kind = "mise"
+package = "github:earendil-works/pi"
+
+[[installations]]
+id = "npm"
+provider_id = "mise"
+kind = "mise"
+package = "npm:@earendil-works/pi-coding-agent"
+
+# Version checks and updates belong to mise, including its configured version range.
+[[components]]
+id = "core"
+display_name = "Core"
+default_strategy = "provider-default"
+version_tracking = "tracked"

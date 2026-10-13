@@ -52,6 +52,18 @@
 依据：[Pi package commands](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/cli.md#package-commands)
 及本机 Pi 1.2.0 的 package-manager 实现。
 
+### 2026-10-13：mise 管理 Pi Core
+
+新增独立的 `pi-mise` 内置 manifest，匹配 mise 的 `aqua:earendil-works/pi`、
+`github:earendil-works/pi` 和 `npm:@earendil-works/pi-coding-agent` 后端。
+Core 版本检查和更新保留 `provider-default`，遵守 mise 配置中的版本请求，
+不会套用 npm 安装的 `pi update --self` 或全局 npm 安装命令。
+精确配置如 `pi = "1.2.0"` 继续受该请求限制；需要持续跟随新版时应配置 `latest`。
+
+Pi 扩展仍由 `pi-extensions` 独立处理，执行已解析的 Pi 入口，包括 mise 的 `pi` shim。
+回归测试覆盖三种后端的识别、与 npm 安装并存时的策略隔离、版本请求的保留，
+以及通过 shim 更新扩展并复查版本，同时保持 Core 不变。
+
 ### 原始实现记录（2026-08-27）
 
 - 完成日期：2026-08-27

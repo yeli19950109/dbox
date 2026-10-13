@@ -102,6 +102,48 @@ fn built_in_pi_enriches_one_generic_installation_without_hiding_unknown_tools() 
 }
 
 #[test]
+fn mise_pi_backends_keep_their_own_update_strategy_alongside_npm_pi() {
+    let catalog = Catalog::build(built_in_manifests()).unwrap();
+    for backend in [
+        "aqua:earendil-works/pi",
+        "github:earendil-works/pi",
+        "npm:@earendil-works/pi-coding-agent",
+    ] {
+        let mut mise_pi = installation("mise", PackageKind::Mise, backend, "pi");
+        // Mise discovery reports installation slots, not PATH executables.
+        mise_pi.executables.clear();
+        let npm_pi = installation(
+            "npm-global",
+            PackageKind::NpmGlobal,
+            "@earendil-works/pi-coding-agent",
+            "pi",
+        );
+        let snapshot = catalog.enrich(&[mise_pi.clone(), npm_pi.clone()]);
+        assert_eq!(snapshot.tools.len(), 2);
+        assert!(snapshot.tools.iter().all(|tool| tool.display_name == "Pi"));
+        let core = &snapshot
+            .tools
+            .iter()
+            .find(|tool| tool.installation_ids == [mise_pi.id.clone()])
+            .unwrap()
+            .components[0];
+        assert_eq!(
+            core.default_strategy.as_ref().unwrap().as_str(),
+            "provider-default"
+        );
+        assert_eq!(core.strategies.len(), 1);
+        assert_eq!(core.strategies[0].kind, StrategyKind::ProviderDefault);
+        let npm_core = &snapshot
+            .tools
+            .iter()
+            .find(|tool| tool.installation_ids == [npm_pi.id.clone()])
+            .unwrap()
+            .components[0];
+        assert_eq!(npm_core.default_strategy.as_ref().unwrap().as_str(), "self");
+    }
+}
+
+#[test]
 fn a_non_matching_pi_named_package_remains_a_normal_automatic_tool() {
     let plain = installation(
         "npm-global",

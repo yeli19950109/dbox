@@ -15,6 +15,7 @@ use crate::version::{ComponentStatus, StatusReason};
 
 pub const SUPPORTED_SCHEMA_VERSION: u32 = 1;
 pub const PI_BUILTIN_MANIFEST: &str = include_str!("../../resources/catalog/pi.toml");
+pub const PI_MISE_BUILTIN_MANIFEST: &str = include_str!("../../resources/catalog/pi-mise.toml");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -336,12 +337,16 @@ pub struct CatalogLoadReport {
 }
 
 pub fn built_in_manifests() -> Vec<LoadedManifest> {
-    vec![LoadedManifest::parse(
-        "resources/catalog/pi.toml",
-        CatalogLayer::BuiltIn,
-        PI_BUILTIN_MANIFEST,
-    )
-    .expect("the embedded Pi catalog manifest is valid")]
+    [
+        ("resources/catalog/pi.toml", PI_BUILTIN_MANIFEST),
+        ("resources/catalog/pi-mise.toml", PI_MISE_BUILTIN_MANIFEST),
+    ]
+    .into_iter()
+    .map(|(source, contents)| {
+        LoadedManifest::parse(source, CatalogLayer::BuiltIn, contents)
+            .expect("the embedded Pi catalog manifest is valid")
+    })
+    .collect()
 }
 
 pub fn load_catalog_with_built_ins(user_directory: impl AsRef<Path>) -> CatalogLoadReport {

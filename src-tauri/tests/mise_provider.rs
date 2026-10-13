@@ -14,7 +14,7 @@ use dbox_lib::application::{
     ApplicationError, ApplicationService, ApplicationServiceOptions, RefreshRequest,
     ResolverApplicationEnvironment, UpdateSelection,
 };
-use dbox_lib::catalog::Catalog;
+use dbox_lib::catalog::{built_in_manifests, Catalog};
 use dbox_lib::domain::{ComponentId, Installation, InstallationScope, StrategyId, Tool};
 use dbox_lib::environment::{EnvironmentResolver, WhichLocator};
 use dbox_lib::executor::{CommandExecutor, CommandSpec, NoopEventSink};
@@ -654,6 +654,52 @@ async fn cache_is_version_sensitive_and_queries_timeout_without_becoming_current
         timed.check_updates(&installations).await.unwrap()[0].status,
         ComponentStatus::CheckFailed { .. }
     ));
+}
+
+#[tokio::test]
+async fn pi_core_uses_mise_updates_and_respects_the_configured_version_request() {
+    for (version_request, latest, status) in [
+        ("1.2.0", "1.2.0", ComponentStatus::UpToDate),
+        ("latest", "1.3.0", ComponentStatus::UpdateAvailable),
+    ] {
+        let fake = FakeMise::new();
+        let versions = json!({"pi": [fake.record("pi", "1.2.0", Some(version_request))]});
+        for listing in ["installed", "global", "current"] {
+            fake.write_json(listing, versions.clone());
+        }
+        fake.write_json("pi", json!({"backend": "aqua:earendil-works/pi"}));
+        fake.write(
+            &format!("aqua_earendil-works_pi@{version_request}.latest"),
+            latest,
+        );
+        let provider = fake.provider();
+        let installations = provider.scan().await.unwrap();
+        let checks = provider.check_updates(&installations).await.unwrap();
+        assert_eq!(checks[0].status, status);
+        let catalog = Catalog::build(built_in_manifests()).unwrap();
+        let snapshot = catalog.enrich(&installations);
+        let pi = &snapshot.tools[0];
+        assert_eq!(pi.display_name, "Pi");
+        let mut update_request = request(&installations[0]);
+        update_request.strategy_id = pi.components[0].default_strategy.clone().unwrap();
+        let plan = provider.plan_update(update_request).await.unwrap();
+        assert_eq!(plan.program, fake.program.to_string_lossy());
+        assert_eq!(
+            plan.args,
+            [
+                "--cd",
+                &fake.home.display().to_string(),
+                "upgrade",
+                "--no-prune",
+                "--yes",
+                "--",
+                &format!("pi@{version_request}"),
+            ]
+        );
+        assert!(fake.calls().contains(&format!(
+            "latest -- aqua:earendil-works/pi@{version_request}"
+        )));
+    }
 }
 
 #[tokio::test]
