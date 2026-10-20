@@ -23,12 +23,16 @@ Git/local packages, project packages, legacy npm-global installations and custom
 instead of being reported as up to date. Legacy global packages remain visible through
 the npm-global provider.
 
-GitHub Releases checks explicitly configured macOS applications without launching or
-updating them. Each `providers.d/*.toml` file declares an application path, expected
-bundle identifier, and public GitHub repository. dbox reads the application's
-`CFBundleShortVersionString` and compares it with GitHub's latest stable release.
+GitHub Releases checks explicitly configured macOS applications and CLI executables.
+Each `providers.d/*.toml` file declares a public GitHub repository and either an
+application path with its expected bundle identifier, or a `[command]` version probe.
+dbox reads the application's `CFBundleShortVersionString` or runs the configured
+absolute executable with the single argument `--version`, then compares the version
+with GitHub's latest release.
 Missing or invalid versions and network failures are reported; these applications
-never receive a Provider update action or enter one-click updates.
+never receive a Provider update action or enter one-click updates. Version commands
+have a 15-second timeout, null stdin, and a 1 MiB limit per output stream. No shell
+command strings, custom arguments, installers, or update commands are accepted.
 
 For DashBeam, copy [the example configuration](examples/providers/dashbeam.toml) to
 `~/Library/Application Support/com.yel.dbox/providers.d/dashbeam.toml`, then refresh
@@ -37,6 +41,26 @@ Provider configuration file, separate from the Catalog editor's `tools.d` manife
 Checks use the public GitHub API without a token; API rate limits are shown as check
 failures. No update commands, downloads of release assets, or application changes are
 performed.
+
+For [llama.cpp](https://github.com/ggml-org/llama.cpp), copy
+[llama-cpp.toml](examples/providers/llama-cpp.toml) into the same `providers.d`
+directory and replace `command.executable` with the absolute path to your `llama`
+or `llama-cli` binary. `command.pattern` must have exactly one capture group and
+match once; `command.stream` selects `stdout` (default) or `stderr`. This example
+supports semantic-version output such as `0.7.0-dev`; older build-only output
+does not compare with semantic releases. Llama.app's own application version is
+separate and remains tracked by Homebrew when installed as the `llama-app` cask.
+
+For [oMLX](https://github.com/jundot/omlx), copy
+[omlx.toml](examples/providers/omlx.toml) into `providers.d`. The application is
+identified by `/Applications/oMLX.app` and bundle ID `app.omlx`.
+`version_format = "python_prerelease"` additionally accepts `X.Y.ZaN`, `X.Y.ZbN`,
+and `X.Y.ZrcN`, preserving the original version text while comparing prerelease
+numbers correctly. `allow_prerelease = true` accepts prerelease versions returned
+by GitHub's `/releases/latest` endpoint (including oMLX release candidates).
+It does not switch to the full release history or nightly builds. Without this
+option, prerelease tags are rejected; draft releases are always rejected.
+These optional fields leave existing DashBeam configurations unchanged.
 
 ## Validation
 

@@ -1,0 +1,10 @@
+# Copy to DBox's providers.d directory.
+# Reads the app metadata, including Python-style release candidates.
+schema_version = 1
+id = "omlx"
+display_name = "oMLX"
+app_path = "/Applications/oMLX.app"
+bundle_id = "app.omlx"
+repository = "jundot/omlx"
+version_format = "python_prerelease"
+allow_prerelease = true

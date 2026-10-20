@@ -1,0 +1,11 @@
+# Copy to DBox's providers.d directory and set your absolute executable path.
+# Checks the llama.cpp CLI, independently of the Llama.app application version.
+schema_version = 1
+id = "llama-cpp"
+display_name = "llama.cpp"
+repository = "ggml-org/llama.cpp"
+
+[command]
+executable = "/Users/USERNAME/.local/bin/llama"
+stream = "stdout"
+pattern = '(?m)^version: ([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?) '

@@ -110,7 +110,7 @@
           Pi 用户级托管 npm 扩展包；按配置的版本范围检查，固定版本不自动更新。
         </p>
         <p v-if="providerFilter === 'github-releases'" class="provider-scope-note">
-          仅检查应用版本与 GitHub 最新稳定版；请通过应用自身更新。
+          仅检查已安装版本与 GitHub 最新发布；请通过原安装方式更新。
         </p>
 
         <div v-if="store.error" class="inline-error" role="alert">

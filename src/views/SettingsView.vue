@@ -44,10 +44,22 @@
           <div><p class="eyebrow">npm scripts</p><h2>全局 CLI 安装脚本授权</h2></div>
           <p>按 CLI 保存 allow-scripts，更新和 Node 迁移时自动沿用。npm 配置中的授权也会保留；历史命令里的一次性授权需要在此补录。</p>
         </header>
-        <div v-for="(policy, index) in scriptPolicies" :key="index" class="field-grid">
-          <label><span>全局 CLI 包名</span><input v-model="policy.packageName" placeholder="@deepseek-ai/dsh" /></label>
-          <label><span>允许运行脚本的包（逗号分隔）</span><input v-model="policy.allowScripts" placeholder="koffi,node-pty,protobufjs" /></label>
-          <button class="text-button" type="button" @click="scriptPolicies.splice(index, 1)">移除授权记录</button>
+        <div v-if="scriptPolicies.length" class="script-policies">
+          <div v-for="(policy, index) in scriptPolicies" :key="index" class="script-policy-row">
+            <label><span>全局 CLI 包名</span><input v-model="policy.packageName" type="text" placeholder="@deepseek-ai/dsh" /></label>
+            <label><span>允许运行脚本的包（逗号分隔）</span><input v-model="policy.allowScripts" type="text" placeholder="koffi,node-pty,protobufjs" /></label>
+            <button
+              class="icon-button script-policy-remove"
+              type="button"
+              :aria-label="`移除 ${policy.packageName || '未命名 CLI'} 的授权记录`"
+              title="移除授权记录"
+              @click="scriptPolicies.splice(index, 1)"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 6h18M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M5 6l1 14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1l1-14M10 10v7M14 10v7" />
+              </svg>
+            </button>
+          </div>
         </div>
         <button class="text-button" type="button" @click="scriptPolicies.push({ packageName: '', allowScripts: '' })">添加 CLI 授权</button>
       </section>
@@ -357,3 +369,40 @@ function shortRevision(value: string): string {
 
 onMounted(() => void loadSettings());
 </script>
+
+<style scoped>
+.script-policies {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.script-policy-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr) 39px;
+  align-items: end;
+  gap: 14px;
+}
+
+.script-policy-row > label {
+  min-width: 0;
+}
+
+.script-policy-remove {
+  width: 39px;
+  height: 39px;
+  color: var(--danger);
+}
+
+.script-policy-remove:hover {
+  color: var(--danger);
+  background: rgb(255 137 126 / 12%);
+}
+
+@media (max-width: 760px) {
+  .script-policy-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) 39px;
+    gap: 8px;
+  }
+}
+</style>

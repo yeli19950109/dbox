@@ -1,11 +1,16 @@
 <template>
   <div class="view extension-view">
-    <header class="extension-heading">
-      <div>
-        <p class="eyebrow">Agent Skills · 用户级</p>
-        <h1>Skills</h1>
-        <p>统一保存技能，分发到 Claude Code、Codex 和 Gemini CLI。</p>
-      </div>
+    <div class="skills-navigation">
+      <nav class="extension-tabs" aria-label="Skill 管理视图">
+        <button
+          v-for="item in tabs"
+          :key="item.id"
+          :class="{ active: tab === item.id }"
+          @click="changeTab(item.id)"
+        >
+          {{ item.label }}
+        </button>
+      </nav>
       <button
         class="button secondary"
         :disabled="store.loading"
@@ -13,17 +18,7 @@
       >
         刷新列表
       </button>
-    </header>
-    <nav class="extension-tabs" aria-label="Skill 管理视图">
-      <button
-        v-for="item in tabs"
-        :key="item.id"
-        :class="{ active: tab === item.id }"
-        @click="changeTab(item.id)"
-      >
-        {{ item.label }}
-      </button>
-    </nav>
+    </div>
     <div ref="content" class="extension-content">
       <div v-if="store.error" class="inline-error" role="alert">
         {{ store.error }}
@@ -633,6 +628,23 @@ onBeforeUnmount(() => store.disconnectEvents());
 </script>
 
 <style scoped>
+.skills-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.skills-navigation .extension-tabs {
+  min-width: 0;
+}
+
+.skills-navigation > .button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .skills-filters,
 .skills-remote-search {
   align-items: flex-end;

@@ -79,6 +79,48 @@ impl Fixture {
         GitHubReleasesProvider::with_test_endpoint(self.config_dir.clone(), &server.url, timeout)
             .unwrap()
     }
+
+    fn options(&self, options: serde_json::Value) {
+        let path = self.config_dir.join("example.toml");
+        let mut config: toml::Value = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        for (key, value) in options.as_object().unwrap() {
+            config
+                .as_table_mut()
+                .unwrap()
+                .insert(key.clone(), toml::Value::try_from(value).unwrap());
+        }
+        fs::write(path, toml::to_string(&config).unwrap()).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn command(&self, body: &str, stream: &str, pattern: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let executable = self.temporary.path().join("bin with spaces/llama");
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::write(
+            &executable,
+            format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 80\n{body}\n"),
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let config = json!({
+            "schema_version": 1,
+            "id": "llama-cpp",
+            "display_name": "llama.cpp",
+            "repository": "ggml-org/llama.cpp",
+            "command": {
+                "executable": executable,
+                "stream": stream,
+                "pattern": pattern,
+            },
+        });
+        fs::write(
+            self.config_dir.join("example.toml"),
+            toml::to_string(&config).unwrap(),
+        )
+        .unwrap();
+        executable
+    }
 }
 
 struct Server {
@@ -241,6 +283,182 @@ async fn supports_binary_plist_and_stable_ids_independent_of_display_name() {
     );
     fixture.config("different", "Renamed", "owner/repo");
     assert_ne!(renamed[0].id, provider.scan().await.unwrap()[0].id);
+}
+
+#[tokio::test]
+async fn python_prereleases_preserve_display_strings_and_compare_numeric_suffixes() {
+    let fixture = Fixture::new();
+    fixture.options(json!({"version_format": "python_prerelease", "allow_prerelease": true}));
+    fixture.plist(Some("0.7.1rc2"), "com.example.app", false);
+    let server = Server::releases(&["v0.7.1rc2", "v0.7.1rc10", "v0.7.1", "v0.7.0"]);
+    let provider = fixture.provider(&server);
+    let apps = provider.scan().await.unwrap();
+    assert_eq!(
+        apps[0].installed_version.as_ref().unwrap().raw(),
+        "0.7.1rc2"
+    );
+    for (expected_version, expected_status) in [
+        ("0.7.1rc2", ComponentStatus::UpToDate),
+        ("0.7.1rc10", ComponentStatus::UpdateAvailable),
+        ("0.7.1", ComponentStatus::UpdateAvailable),
+        ("0.7.0", ComponentStatus::UpToDate),
+    ] {
+        let checks = provider.check_updates(&apps).await.unwrap();
+        assert_eq!(
+            checks[0].latest_version.as_ref().unwrap().raw(),
+            expected_version
+        );
+        assert_eq!(checks[0].status, expected_status);
+    }
+}
+
+#[tokio::test]
+async fn python_format_and_remote_prereleases_require_explicit_options() {
+    let fixture = Fixture::new();
+    fixture.plist(Some("0.7.1rc1"), "com.example.app", false);
+    let provider = GitHubReleasesProvider::new(fixture.config_dir.clone());
+    let apps = provider.scan().await.unwrap();
+    assert_failure(
+        &provider.check_updates(&apps).await.unwrap()[0].status,
+        "app_version_invalid",
+    );
+
+    fixture.options(json!({"version_format": "python_prerelease"}));
+    let server = Server::releases(&["v0.7.1rc1"]);
+    let provider = fixture.provider(&server);
+    let apps = provider.scan().await.unwrap();
+    assert_failure(
+        &provider.check_updates(&apps).await.unwrap()[0].status,
+        "github_release_unstable",
+    );
+
+    fixture.options(json!({"allow_prerelease": true}));
+    let server = Server::new(
+        vec![(
+            200,
+            "",
+            json!({"tag_name":"v0.7.1rc1","draft":true,"prerelease":true}).to_string(),
+        )],
+        Duration::ZERO,
+    );
+    let provider = fixture.provider(&server);
+    let apps = provider.scan().await.unwrap();
+    assert_failure(
+        &provider.check_updates(&apps).await.unwrap()[0].status,
+        "github_release_unstable",
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn explicitly_configured_cli_checks_version_with_a_single_fixed_argument() {
+    let fixture = Fixture::new();
+    for stream in ["stdout", "stderr"] {
+        let redirect = if stream == "stderr" { ">&2" } else { "" };
+        let executable = fixture.command(
+            &format!("printf 'version: 0.7.0-dev (build 11706, commit abc123)\\n' {redirect}"),
+            stream,
+            r"(?m)^version: ([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?) ",
+        );
+        let before = fs::read(&executable).unwrap();
+        let server = Server::releases(&["v0.7.0"]);
+        let provider = fixture.provider(&server);
+        let apps = provider.scan().await.unwrap();
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].install_path.as_ref(), Some(&executable));
+        assert_eq!(
+            apps[0].installed_version.as_ref().unwrap().raw(),
+            "0.7.0-dev"
+        );
+        assert_eq!(
+            provider.check_updates(&apps).await.unwrap()[0].status,
+            ComponentStatus::UpdateAvailable
+        );
+        assert!(!provider.capabilities().update);
+        assert_eq!(fs::read(executable).unwrap(), before);
+        assert!(server.requests.lock().unwrap()[0]
+            .starts_with("GET /repos/ggml-org/llama.cpp/releases/latest "));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cli_failures_remain_visible_and_do_not_query_github() {
+    let fixture = Fixture::new();
+    let server = Server::releases(&[]);
+    let provider = fixture.provider_timeout(&server, Duration::from_millis(100));
+    for (body, pattern, code) in [
+        ("exit 1", r"version: (\S+)", "command_failed"),
+        ("exec sleep 5", r"version: (\S+)", "command_timeout"),
+        (
+            "printf 'no version'",
+            r"version: (\S+)",
+            "command_version_missing",
+        ),
+        (
+            "printf 'version: nonsense'",
+            r"version: (\S+)",
+            "command_version_invalid",
+        ),
+        (
+            "printf 'version: 1.0.0\\nversion: 2.0.0'",
+            r"version: (\S+)",
+            "command_version_ambiguous",
+        ),
+        (
+            "head -c 1048577 /dev/zero",
+            r"version: (\S+)",
+            "command_failed",
+        ),
+    ] {
+        fixture.command(body, "stdout", pattern);
+        let apps = provider.scan().await.unwrap();
+        assert_eq!(apps.len(), 1);
+        assert!(apps[0].installed_version.is_none());
+        assert_failure(
+            &provider.check_updates(&apps).await.unwrap()[0].status,
+            code,
+        );
+    }
+    let executable = fixture.command("printf 'version: 1.0.0'", "stdout", r"version: (\S+)");
+    fs::remove_file(executable).unwrap();
+    assert!(provider.scan().await.unwrap().is_empty());
+    assert!(server.requests.lock().unwrap().is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cli_configs_reject_ambiguous_sources_relative_paths_and_extra_arguments() {
+    let fixture = Fixture::new();
+    let provider = GitHubReleasesProvider::new(fixture.config_dir.clone());
+    for pattern in ["[", "version", "(one)(two)"] {
+        fixture.command("exit 0", "stdout", pattern);
+        assert!(provider
+            .scan()
+            .await
+            .unwrap_err()
+            .summary
+            .contains("pattern"));
+    }
+    fixture.command("exit 0", "stdout", "(version)");
+    fixture
+        .options(json!({"app_path": "/Applications/Example.app", "bundle_id": "com.example.app"}));
+    assert!(provider
+        .scan()
+        .await
+        .unwrap_err()
+        .summary
+        .contains("exclusively"));
+    fixture.command("exit 0", "stdout", "(version)");
+    fixture.options(json!({"command": {"executable": "llama", "pattern": "(version)"}}));
+    assert!(provider
+        .scan()
+        .await
+        .unwrap_err()
+        .summary
+        .contains("absolute"));
+    fixture.options(json!({"command": {"executable": "/bin/sh", "pattern": "(version)", "args": ["-c", "exit 0"]}}));
+    assert!(provider.scan().await.is_err());
 }
 
 #[tokio::test]

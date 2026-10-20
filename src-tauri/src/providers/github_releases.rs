@@ -1,14 +1,18 @@
-//! Configuration-driven, read-only checks for macOS apps published on GitHub.
-//! Only Info.plist and release metadata are read; apps and installers never run.
+//! Configuration-driven version checks for apps and CLIs published on GitHub.
+//! App versions come from Info.plist; explicitly configured CLIs run only --version.
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use regex::Regex;
 use reqwest::{Client, StatusCode, Url};
 use semver::Version;
 use serde::Deserialize;
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::process::Command;
 
 use super::{
     ProviderCapabilities, ProviderError, ProviderOperation, ProviderProgress,
@@ -31,9 +35,69 @@ struct AppConfig {
     schema_version: u32,
     id: String,
     display_name: String,
-    app_path: PathBuf,
-    bundle_id: String,
+    app_path: Option<PathBuf>,
+    bundle_id: Option<String>,
+    command: Option<VersionCommand>,
     repository: String,
+    #[serde(default)]
+    version_format: VersionFormat,
+    #[serde(default)]
+    allow_prerelease: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VersionCommand {
+    executable: PathBuf,
+    pattern: String,
+    #[serde(default)]
+    stream: CommandStream,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CommandStream {
+    #[default]
+    Stdout,
+    Stderr,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum VersionFormat {
+    #[default]
+    Semver,
+    PythonPrerelease,
+}
+
+impl VersionFormat {
+    fn parse(self, raw: &str) -> Option<Version> {
+        if let Ok(version) = Version::parse(raw) {
+            return Some(version);
+        }
+        if !matches!(self, Self::PythonPrerelease) {
+            return None;
+        }
+        // A deliberately bounded subset: X.Y.Z followed by aN, bN, or rcN.
+        // Normalize the numeric part so rc10 sorts after rc2.
+        let pattern = Regex::new(r"^([0-9]+\.[0-9]+\.[0-9]+)(a|b|rc)([0-9]+)$")
+            .expect("static Python prerelease pattern is valid");
+        let captures = pattern.captures(raw)?;
+        let number: u64 = captures[3].parse().ok()?;
+        Version::parse(&format!("{}-{}.{number}", &captures[1], &captures[2])).ok()
+    }
+}
+
+impl AppConfig {
+    fn installed_path(&self) -> &Path {
+        match &self.command {
+            Some(command) => &command.executable,
+            None => self
+                .app_path
+                .as_deref()
+                .expect("validated application path"),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -148,7 +212,7 @@ impl GitHubReleasesProvider {
             })?;
             let config: AppConfig = std::str::from_utf8(&bytes).ok()
                 .and_then(|text| toml::from_str(text).ok())
-                .ok_or_else(|| provider_error(operation, &format!("Invalid provider config {label}: expected schema_version, id, display_name, app_path, bundle_id, repository")))?;
+                .ok_or_else(|| provider_error(operation, &format!("Invalid provider config {label}: expected schema_version, id, display_name, repository and either app_path/bundle_id or command")))?;
             let issue = validate_config(&config);
             if let Some(issue) = issue {
                 return Err(provider_error(
@@ -156,10 +220,11 @@ impl GitHubReleasesProvider {
                     &format!("Invalid provider config {label}: {issue}"),
                 ));
             }
-            if !ids.insert(config.id.clone()) || !apps.insert(config.app_path.clone()) {
+            if !ids.insert(config.id.clone()) || !apps.insert(config.installed_path().to_path_buf())
+            {
                 return Err(provider_error(
                     operation,
-                    &format!("Duplicate provider config id or app_path in {label}"),
+                    &format!("Duplicate provider config id or installed path in {label}"),
                 ));
             }
             configs.push(config);
@@ -168,13 +233,19 @@ impl GitHubReleasesProvider {
     }
 
     async fn app_snapshot(&self, config: AppConfig) -> Result<Option<AppSnapshot>, ProviderError> {
-        match tokio::fs::metadata(&config.app_path).await {
-            Ok(metadata) if metadata.is_dir() => {}
+        let installed_path = config.installed_path();
+        match tokio::fs::metadata(installed_path).await {
+            Ok(metadata)
+                if if config.command.is_some() {
+                    metadata.is_file()
+                } else {
+                    metadata.is_dir()
+                } => {}
             Ok(_) => {
                 return Err(provider_error(
                     ProviderOperation::Scan,
                     &format!(
-                        "{} app_path is not an application directory",
+                        "{} installed path has the wrong file type",
                         config.display_name
                     ),
                 ))
@@ -183,91 +254,114 @@ impl GitHubReleasesProvider {
             Err(_) => {
                 return Err(provider_error(
                     ProviderOperation::Scan,
-                    &format!(
-                        "Could not inspect {} application directory",
-                        config.display_name
-                    ),
+                    &format!("Could not inspect {} installed path", config.display_name),
                 ))
             }
         }
         let mut installation = Installation::new(
             self.id(),
-            PackageCoordinate::new(PackageKind::Other("macos_app".into()), &config.display_name)
-                .expect("validated display name is a package coordinate"),
-            if config.app_path.starts_with("/Applications") {
+            PackageCoordinate::new(
+                PackageKind::Other(
+                    if config.command.is_some() {
+                        "direct_cli"
+                    } else {
+                        "macos_app"
+                    }
+                    .into(),
+                ),
+                &config.display_name,
+            )
+            .expect("validated display name is a package coordinate"),
+            if installed_path.starts_with("/Applications") {
                 InstallationScope::System
             } else {
                 InstallationScope::User
             },
         )
         .expect("static provider and package IDs are valid");
-        let path_hash = blake3::hash(config.app_path.as_os_str().as_encoded_bytes()).to_hex();
+        let path_hash = blake3::hash(installed_path.as_os_str().as_encoded_bytes()).to_hex();
         installation.id = InstallationId::new(format!(
             "github-releases:{}:{}",
             config.id,
             &path_hash[..16]
         ))
         .expect("validated config ID is valid");
-        installation.install_path = Some(config.app_path.clone());
-        let result = read_limited(
-            &config.app_path.join("Contents/Info.plist"),
-            MAX_METADATA_BYTES,
-        )
-        .await
-        .map_err(|_| {
-            StatusReason::new(
-                "app_metadata_unreadable",
-                "Could not read application Info.plist (maximum 1 MiB)",
-                false,
+        installation.install_path = Some(installed_path.to_path_buf());
+        let result = if let Some(command) = &config.command {
+            self.command_version(command).await.and_then(|raw| {
+                config
+                    .version_format
+                    .parse(&raw)
+                    .map(|_| VersionValue::new(raw))
+                    .ok_or_else(|| {
+                        StatusReason::new(
+                            "command_version_invalid",
+                            "The captured command version does not match version_format",
+                            false,
+                        )
+                    })
+            })
+        } else {
+            read_limited(
+                &installed_path.join("Contents/Info.plist"),
+                MAX_METADATA_BYTES,
             )
-        })
-        .and_then(|bytes| {
-            plist::Value::from_reader(std::io::Cursor::new(bytes)).map_err(|_| {
+            .await
+            .map_err(|_| {
                 StatusReason::new(
-                    "app_metadata_invalid",
-                    "Application Info.plist is invalid",
+                    "app_metadata_unreadable",
+                    "Could not read application Info.plist (maximum 1 MiB)",
                     false,
                 )
             })
-        })
-        .and_then(|value| {
-            let values = value.as_dictionary().ok_or_else(|| {
-                StatusReason::new(
-                    "app_metadata_invalid",
-                    "Application Info.plist must contain a dictionary",
-                    false,
-                )
-            })?;
-            if values
-                .get("CFBundleIdentifier")
-                .and_then(plist::Value::as_string)
-                != Some(config.bundle_id.as_str())
-            {
-                return Err(StatusReason::new(
-                    "app_bundle_mismatch",
-                    "Application bundle identifier does not match the provider configuration",
-                    false,
-                ));
-            }
-            let raw = values
-                .get("CFBundleShortVersionString")
-                .and_then(plist::Value::as_string)
-                .ok_or_else(|| {
+            .and_then(|bytes| {
+                plist::Value::from_reader(std::io::Cursor::new(bytes)).map_err(|_| {
                     StatusReason::new(
-                        "app_version_missing",
-                        "Application Info.plist has no CFBundleShortVersionString",
+                        "app_metadata_invalid",
+                        "Application Info.plist is invalid",
+                        false,
+                    )
+                })
+            })
+            .and_then(|value| {
+                let values = value.as_dictionary().ok_or_else(|| {
+                    StatusReason::new(
+                        "app_metadata_invalid",
+                        "Application Info.plist must contain a dictionary",
                         false,
                     )
                 })?;
-            Version::parse(raw).map_err(|_| {
-                StatusReason::new(
-                    "app_version_invalid",
-                    "Application version is not a strict semantic version",
-                    false,
-                )
-            })?;
-            Ok(VersionValue::new(raw))
-        });
+                if values
+                    .get("CFBundleIdentifier")
+                    .and_then(plist::Value::as_string)
+                    != config.bundle_id.as_deref()
+                {
+                    return Err(StatusReason::new(
+                        "app_bundle_mismatch",
+                        "Application bundle identifier does not match the provider configuration",
+                        false,
+                    ));
+                }
+                let raw = values
+                    .get("CFBundleShortVersionString")
+                    .and_then(plist::Value::as_string)
+                    .ok_or_else(|| {
+                        StatusReason::new(
+                            "app_version_missing",
+                            "Application Info.plist has no CFBundleShortVersionString",
+                            false,
+                        )
+                    })?;
+                config.version_format.parse(raw).ok_or_else(|| {
+                    StatusReason::new(
+                        "app_version_invalid",
+                        "Application version does not match version_format",
+                        false,
+                    )
+                })?;
+                Ok(VersionValue::new(raw))
+            })
+        };
         let issue = match result {
             Ok(version) => {
                 installation.installed_version = Some(version);
@@ -282,10 +376,73 @@ impl GitHubReleasesProvider {
         }))
     }
 
-    async fn latest(&self, repository: &str) -> Result<VersionValue, StatusReason> {
+    async fn command_version(&self, config: &VersionCommand) -> Result<String, StatusReason> {
+        let operation = async {
+            let mut child = Command::new(&config.executable)
+                .arg("--version")
+                .current_dir(
+                    config
+                        .executable
+                        .parent()
+                        .expect("absolute executable path"),
+                )
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()?;
+            let stdout = child.stdout.take().expect("piped stdout");
+            let stderr = child.stderr.take().expect("piped stderr");
+            let (stdout, stderr, status) = tokio::try_join!(
+                read_command_output(stdout),
+                read_command_output(stderr),
+                child.wait(),
+            )?;
+            if !status.success() {
+                return Err(std::io::Error::other("version command failed"));
+            }
+            Ok(match config.stream {
+                CommandStream::Stdout => stdout,
+                CommandStream::Stderr => stderr,
+            })
+        };
+        let output = tokio::time::timeout(self.request_timeout, operation)
+            .await
+            .map_err(|_| StatusReason::new("command_timeout", "Version command timed out", true))?
+            .map_err(|_| StatusReason::new("command_failed", "Could not read --version output (requires exit code 0 and at most 1 MiB per stream)", true))?;
+        let output = std::str::from_utf8(&output).map_err(|_| {
+            StatusReason::new(
+                "command_output_invalid",
+                "Version command output is not UTF-8",
+                false,
+            )
+        })?;
+        let pattern = Regex::new(&config.pattern).expect("validated version pattern");
+        let mut matches = pattern.captures_iter(output);
+        let version = matches
+            .next()
+            .and_then(|capture| capture.get(1))
+            .ok_or_else(|| {
+                StatusReason::new(
+                    "command_version_missing",
+                    "Version pattern did not capture a version",
+                    false,
+                )
+            })?;
+        if matches.next().is_some() {
+            return Err(StatusReason::new(
+                "command_version_ambiguous",
+                "Version pattern matched more than once",
+                false,
+            ));
+        }
+        Ok(version.as_str().to_owned())
+    }
+
+    async fn latest(&self, config: &AppConfig) -> Result<VersionValue, StatusReason> {
         let endpoint = self
             .api_base
-            .join(&format!("repos/{repository}/releases/latest"))
+            .join(&format!("repos/{}/releases/latest", config.repository))
             .expect("validated repository produces a valid GitHub URL");
         let response = self
             .client
@@ -377,7 +534,7 @@ impl GitHubReleasesProvider {
                 false,
             )
         })?;
-        if release.draft || release.prerelease {
+        if release.draft || (release.prerelease && !config.allow_prerelease) {
             return Err(StatusReason::new(
                 "github_release_unstable",
                 "GitHub latest release is a draft or prerelease; no stable version was accepted",
@@ -388,14 +545,14 @@ impl GitHubReleasesProvider {
             .tag_name
             .strip_prefix('v')
             .unwrap_or(&release.tag_name);
-        let parsed = Version::parse(version).map_err(|_| {
+        let parsed = config.version_format.parse(version).ok_or_else(|| {
             StatusReason::new(
                 "github_version_invalid",
-                "GitHub release tag is not a semantic version (expected v1.2.3 or 1.2.3)",
+                "GitHub release tag does not match version_format",
                 false,
             )
         })?;
-        if !parsed.pre.is_empty() {
+        if !parsed.pre.is_empty() && !config.allow_prerelease {
             return Err(StatusReason::new(
                 "github_release_unstable",
                 "GitHub release tag is a prerelease; no stable version was accepted",
@@ -426,7 +583,7 @@ impl ToolProvider for GitHubReleasesProvider {
             available: true,
             version: None,
             detail: Some(format!(
-                "{} configured applications; read-only Info.plist and GitHub stable release checks",
+                "{} configured tools; Info.plist or --version and GitHub latest release checks",
                 configs.len()
             )),
         })
@@ -500,7 +657,7 @@ impl ToolProvider for GitHubReleasesProvider {
             {
                 Some(snapshot) => match &snapshot.issue {
                     Some(issue) => Err(issue.clone()),
-                    None => self.latest(&snapshot.config.repository).await,
+                    None => self.latest(&snapshot.config).await,
                 },
                 None => Err(StatusReason::new(
                     "scan_required",
@@ -510,9 +667,23 @@ impl ToolProvider for GitHubReleasesProvider {
             };
             let (latest_version, status) = match result {
                 Ok(latest) => {
+                    // Preserve original strings in the UI/cache while comparing normalized
+                    // versions (e.g. 0.7.1rc1 must remain older than 0.7.1).
+                    let format = snapshots
+                        .get(&installation.id)
+                        .expect("checked snapshot")
+                        .config
+                        .version_format;
+                    let normalized = |version: &VersionValue| {
+                        format
+                            .parse(version.raw())
+                            .map(|version| VersionValue::new(version.to_string()))
+                    };
+                    let installed = installation.installed_version.as_ref().and_then(normalized);
+                    let normalized_latest = normalized(&latest);
                     let status = ComponentStatus::from_versions(
-                        installation.installed_version.as_ref(),
-                        Some(&latest),
+                        installed.as_ref(),
+                        normalized_latest.as_ref(),
                     );
                     (Some(latest), status)
                 }
@@ -543,7 +714,6 @@ impl ToolProvider for GitHubReleasesProvider {
 }
 
 async fn read_limited(path: &Path, max_bytes: u64) -> Result<Vec<u8>, std::io::Error> {
-    use tokio::io::AsyncReadExt;
     let file = tokio::fs::File::open(path).await?;
     if !file.metadata().await?.is_file() {
         return Err(std::io::Error::other("expected a regular file"));
@@ -552,6 +722,18 @@ async fn read_limited(path: &Path, max_bytes: u64) -> Result<Vec<u8>, std::io::E
     file.take(max_bytes + 1).read_to_end(&mut bytes).await?;
     if bytes.len() as u64 > max_bytes {
         return Err(std::io::Error::other("file exceeds size limit"));
+    }
+    Ok(bytes)
+}
+
+async fn read_command_output(reader: impl AsyncRead + Unpin) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader
+        .take(MAX_METADATA_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .await?;
+    if bytes.len() as u64 > MAX_METADATA_BYTES {
+        return Err(std::io::Error::other("command output exceeds size limit"));
     }
     Ok(bytes)
 }
@@ -578,23 +760,46 @@ fn validate_config(config: &AppConfig) -> Option<&'static str> {
     {
         return Some("display_name must be non-empty, trimmed and contain no control characters");
     }
-    if !config.app_path.is_absolute()
-        || config
-            .app_path
-            .extension()
-            .is_none_or(|extension| extension != "app")
-        || config
-            .app_path
-            .components()
-            .any(|component| component == std::path::Component::ParentDir)
-    {
-        return Some("app_path must be an absolute .app path without parent traversals");
-    }
-    if config.bundle_id.is_empty()
-        || config.bundle_id.trim() != config.bundle_id
-        || config.bundle_id.chars().any(char::is_control)
-    {
-        return Some("bundle_id must be non-empty, trimmed and contain no control characters");
+    match (&config.app_path, &config.bundle_id, &config.command) {
+        (Some(app_path), Some(bundle_id), None) => {
+            if !app_path.is_absolute()
+                || app_path
+                    .extension()
+                    .is_none_or(|extension| extension != "app")
+                || app_path
+                    .components()
+                    .any(|component| component == std::path::Component::ParentDir)
+            {
+                return Some("app_path must be an absolute .app path without parent traversals");
+            }
+            if bundle_id.is_empty()
+                || bundle_id.trim() != bundle_id
+                || bundle_id.chars().any(char::is_control)
+            {
+                return Some(
+                    "bundle_id must be non-empty, trimmed and contain no control characters",
+                );
+            }
+        }
+        (None, None, Some(command)) => {
+            if !command.executable.is_absolute()
+                || command.executable.file_name().is_none()
+                || command
+                    .executable
+                    .components()
+                    .any(|component| component == std::path::Component::ParentDir)
+            {
+                return Some(
+                    "command.executable must be an absolute file path without parent traversals",
+                );
+            }
+            if !Regex::new(&command.pattern).is_ok_and(|pattern| pattern.captures_len() == 2) {
+                return Some(
+                    "command.pattern must be a valid regex with exactly one capture group",
+                );
+            }
+        }
+        _ => return Some("configure either app_path and bundle_id, or command, exclusively"),
     }
     let mut parts = config.repository.split('/');
     if !parts.next().is_some_and(identifier)
