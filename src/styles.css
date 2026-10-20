@@ -358,7 +358,8 @@ pre {
   padding: 30px clamp(28px, 5vw, 78px) 80px;
 }
 
-.tools-view {
+.tools-view,
+.runs-view {
   height: calc(100vh - 64px);
   height: calc(100dvh - 64px);
   min-height: 0;
@@ -1395,9 +1396,11 @@ input[type="checkbox"] {
 }
 
 .runs-layout {
-  min-height: 630px;
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(310px, 0.68fr) minmax(480px, 1.32fr);
+  grid-template-rows: minmax(0, 1fr);
   border: 1px solid var(--line);
   border-radius: 13px;
   overflow: hidden;
@@ -1405,6 +1408,10 @@ input[type="checkbox"] {
 }
 
 .history-panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   border-right: 1px solid var(--line);
   background: #101820;
 }
@@ -1435,8 +1442,10 @@ input[type="checkbox"] {
 }
 
 .history-list {
-  max-height: 680px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 
 .history-item {
@@ -1498,7 +1507,27 @@ input[type="checkbox"] {
 
 .run-detail {
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   padding: 20px;
+}
+
+.runs-view > :not(.runs-layout),
+.history-panel > header,
+.run-detail__header,
+.verification-banner,
+.log-shell > header {
+  flex-shrink: 0;
+}
+
+.history-panel > .state-panel,
+.history-panel > .empty-state,
+.run-detail > .state-panel,
+.run-detail > .empty-state {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .run-detail__header {
@@ -1546,6 +1575,10 @@ input[type="checkbox"] {
 }
 
 .log-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--line);
   border-radius: 9px;
   overflow: hidden;
@@ -1561,8 +1594,10 @@ input[type="checkbox"] {
 
 .log-viewport {
   position: relative;
-  height: 520px;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   contain: strict;
   scrollbar-color: var(--line-strong) transparent;
 }
@@ -1779,16 +1814,13 @@ input[type="checkbox"] {
   }
 
   .runs-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 2fr);
   }
 
   .history-panel {
     border-right: 0;
     border-bottom: 1px solid var(--line);
-  }
-
-  .history-list {
-    max-height: 320px;
   }
 }
 
@@ -1847,7 +1879,8 @@ input[type="checkbox"] {
     padding: 20px 16px 60px;
   }
 
-  .tools-view {
+  .tools-view,
+  .runs-view {
     height: calc(100vh - 54px);
     height: calc(100dvh - 54px);
     min-height: 0;
@@ -2184,7 +2217,11 @@ input[type="checkbox"] {
 }
 
 .native-run-results {
-  margin: 16px;
+  min-height: 0;
+  max-height: 25%;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  margin: 0 0 12px;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 10px;

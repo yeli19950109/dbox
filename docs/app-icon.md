@@ -1,7 +1,8 @@
-# dbox app icon
+# DBox app icon
 
-The icon combines a mint tool box and a terminal prompt on a dark navy tile,
-matching the application palette.
+The icon combines a mint developer toolbox and a terminal prompt on a dark navy
+background, matching the application palette. The current artwork was generated
+with the built-in `image_gen` tool on 2026-10-20.
 
 - Cross-platform source: [`src-tauri/app-icon.png`](../src-tauri/app-icon.png)
 - Native macOS source: [`AppIcon.icon`](../src-tauri/icons/AppIcon.icon/)
@@ -41,6 +42,8 @@ the generated desktop assets. To regenerate them from the repository root:
 dbox_icon_output=$(mktemp -d)
 npm run tauri -- icon src-tauri/app-icon.png --output "$dbox_icon_output"
 cp "$dbox_icon_output"/*.png "$dbox_icon_output"/*.ico "$dbox_icon_output"/*.icns src-tauri/icons/
+npm run tauri -- icon src-tauri/app-icon.png --png 1024 --output "$dbox_icon_output/native"
+cp "$dbox_icon_output/native/1024x1024.png" src-tauri/icons/AppIcon.icon/Assets/Artwork.png
 npm run icons:macos
 ```
 
@@ -48,7 +51,20 @@ Tauri also generates mobile assets in the temporary directory. Only the desktop
 assets are copied into this project. Always regenerate the native macOS icon
 last: Tauri's icon command overwrites the compiled legacy ICNS fallback.
 
-## macOS artwork edit prompt
+## Current generation prompt (2026-10-20)
+
+```text
+Use case: logo-brand
+Asset type: Production macOS application icon artwork for DBox, a local command-line tool manager.
+Primary request: Generate one beautifully crafted, instantly recognizable icon: a single compact mint-green developer toolbox/cube with a bold terminal prompt >_ on its large front face. This is the actual icon artwork, not a presentation or device mockup.
+Composition: Square 1024x1024 image. A large optically centered closed cube with subtly rounded and beveled edges, simple readable geometry, front face dominant, a little top and right side visible. Object occupies about 66 percent of the canvas width and height. Strong silhouette recognizable at 32px.
+Style: Restrained premium native desktop app icon, tactile satin ceramic or anodized finish, crisp clean surfaces, gentle dimensional depth, subtle contact shadow. Confident simple geometry and no intricate detail.
+Color palette: continuous opaque dark navy #0c1218 background filling the square edge to edge, mint green #5de1c2 object, pale mint top highlights, deep teal shaded side, near-white #e8edf2 terminal glyph with excellent contrast. Match a dark developer utility with mint accents.
+Text (verbatim): Only the terminal glyph ">_" on the front face. No wordmark and no letters.
+Constraints: Full-bleed opaque square artwork. macOS will apply the rounded-square mask, so do not draw an outer rounded tile, outer frame, border, or transparent margins. All corners must remain opaque dark navy. One icon only, no multiple options, no extra symbols, no badges, no open lid or flaps, no handle, no particles, no neon glow, no watermark, no text labels, no checkerboard. Keep the central box and terminal glyph large and legible.
+```
+
+## Previous macOS artwork edit prompt
 
 ```text
 Use case: precise-object-edit
@@ -59,7 +75,7 @@ Composition: Same square canvas and same cube size and placement as input. The a
 Constraints: Absolutely no transparent margin, no baked rounded corners, no inset tile, no visible outer border, no gray, white, or silver framing, no additional objects, no changes to the cube or terminal glyph. All edge and corner pixels must be opaque dark navy. Deliver one square production image only.
 ```
 
-## Original image generation prompt
+## Previous image generation prompt
 
 ```text
 Use case: logo-brand
