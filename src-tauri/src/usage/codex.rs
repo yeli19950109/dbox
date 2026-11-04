@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use super::rollout_file;
 
@@ -74,18 +75,24 @@ struct TimestampedTokenSignature {
     signature: TokenUsageSignature,
 }
 
-/// Size + mtime identity used to invalidate cached parses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FileStamp {
-    modified: Option<SystemTime>,
-    size: u64,
+/// Size + mtime identity used to detect changed rollouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileStamp {
+    /// Modification time in nanoseconds since the Unix epoch.
+    pub modified_ns: Option<u64>,
+    pub size: u64,
 }
 
 impl FileStamp {
-    fn of(path: &Path) -> Option<Self> {
+    pub fn of(path: &Path) -> Option<Self> {
         let metadata = fs::metadata(path).ok()?;
         Some(Self {
-            modified: metadata.modified().ok(),
+            modified_ns: metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
+                .and_then(|duration| u64::try_from(duration.as_nanos()).ok()),
             size: metadata.len(),
         })
     }
@@ -188,6 +195,8 @@ impl CodexParseCache {
 /// One counted request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodexUsageEvent {
+    /// Stable request identity: `<rollout thread ID>:<event index | usage:id>`.
+    pub request_key: String,
     pub thread_id: String,
     pub model: String,
     pub timestamp: Option<DateTime<Utc>>,
@@ -200,9 +209,22 @@ pub struct DeferredFile {
     pub reason: String,
 }
 
+/// A rollout that was parsed in this scan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScannedFile {
+    pub path: PathBuf,
+    pub stamp: Option<FileStamp>,
+    /// Deferred files must be parsed again on the next scan.
+    pub deferred: bool,
+    pub replayed_events: usize,
+    pub duplicate_events: usize,
+}
+
 #[derive(Debug, Default)]
 pub struct CodexScan {
     pub files_scanned: usize,
+    /// Rollouts parsed in this scan; unchanged rollouts the caller skipped are absent.
+    pub files: Vec<ScannedFile>,
     pub events: Vec<CodexUsageEvent>,
     pub deferred: Vec<DeferredFile>,
     /// Token events skipped because they replay parent history.
@@ -1184,8 +1206,16 @@ fn parsed_file(
     Ok(parsed)
 }
 
-/// Read every Codex rollout under `codex_home` and return the counted requests.
-pub fn scan_codex_usage(codex_home: &Path, cache: &mut CodexParseCache) -> CodexScan {
+/// Read the Codex rollouts under `codex_home` and return the counted requests.
+///
+/// `skip` is asked for every rollout with its current stamp; returning true
+/// leaves an unchanged, already recorded rollout unparsed. Skipped rollouts
+/// still serve as parents of other rollouts.
+pub fn scan_codex_usage(
+    codex_home: &Path,
+    cache: &mut CodexParseCache,
+    skip: &dyn Fn(&Path, &FileStamp) -> bool,
+) -> CodexScan {
     let files = collect_codex_session_files(codex_home);
     let rollout_index = build_rollout_index(&files);
     cache.retain_paths(&files.iter().collect());
@@ -1197,10 +1227,21 @@ pub fn scan_codex_usage(codex_home: &Path, cache: &mut CodexParseCache) -> Codex
     let mut seen_requests: HashSet<String> = HashSet::new();
 
     for path in &files {
+        let stamp = FileStamp::of(path);
+        if stamp.is_some_and(|stamp| skip(path, &stamp)) {
+            continue;
+        }
         let defer = |scan: &mut CodexScan, reason: String| {
             scan.deferred.push(DeferredFile {
                 path: path.clone(),
                 reason,
+            });
+            scan.files.push(ScannedFile {
+                path: path.clone(),
+                stamp,
+                deferred: true,
+                replayed_events: 0,
+                duplicate_events: 0,
             });
         };
         let parsed = match parsed_file(path, &rollout_index, cache) {
@@ -1210,7 +1251,15 @@ pub fn scan_codex_usage(codex_home: &Path, cache: &mut CodexParseCache) -> Codex
                 continue;
             }
         };
+        let mut scanned = ScannedFile {
+            path: path.clone(),
+            stamp,
+            deferred: false,
+            replayed_events: 0,
+            duplicate_events: 0,
+        };
         if !parsed.has_billable_tokens {
+            scan.files.push(scanned);
             continue;
         }
         let Some(root_thread_id) = parsed.root_thread_id.as_deref() else {
@@ -1259,7 +1308,7 @@ pub fn scan_codex_usage(codex_home: &Path, cache: &mut CodexParseCache) -> Codex
             .filter_map(|(offset, event)| {
                 let index = event.event_index?;
                 if offset < replay_prefix {
-                    scan.replayed_events += 1;
+                    scanned.replayed_events += 1;
                     return None;
                 }
                 Some((event, index.to_string()))
@@ -1270,11 +1319,13 @@ pub fn scan_codex_usage(codex_home: &Path, cache: &mut CodexParseCache) -> Codex
             .iter()
             .filter_map(|event| Some((event, event.request_suffix.clone()?)));
         for (event, suffix) in token_events.into_iter().chain(record_events) {
-            if !seen_requests.insert(format!("{root_thread_id}:{suffix}")) {
-                scan.duplicate_events += 1;
+            let request_key = format!("{root_thread_id}:{suffix}");
+            if !seen_requests.insert(request_key.clone()) {
+                scanned.duplicate_events += 1;
                 continue;
             }
             scan.events.push(CodexUsageEvent {
+                request_key,
                 thread_id: session_thread_id.to_string(),
                 model: event.model.clone(),
                 timestamp: parse_timestamp(
@@ -1287,6 +1338,9 @@ pub fn scan_codex_usage(codex_home: &Path, cache: &mut CodexParseCache) -> Codex
                 tokens: event.delta,
             });
         }
+        scan.replayed_events += scanned.replayed_events;
+        scan.duplicate_events += scanned.duplicate_events;
+        scan.files.push(scanned);
     }
     scan
 }
@@ -1405,7 +1459,7 @@ mod tests {
     }
 
     fn scan(home: &Path) -> CodexScan {
-        scan_codex_usage(home, &mut CodexParseCache::default())
+        scan_codex_usage(home, &mut CodexParseCache::default(), &|_, _| false)
     }
 
     fn summary(scan: &CodexScan) -> Vec<(String, u64, u64, u64)> {
@@ -1653,7 +1707,7 @@ mod tests {
             ],
         );
         let mut cache = CodexParseCache::default();
-        let scan = scan_codex_usage(home.path(), &mut cache);
+        let scan = scan_codex_usage(home.path(), &mut cache, &|_, _| false);
         assert_eq!(
             summary(&scan),
             vec![

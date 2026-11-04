@@ -58,6 +58,7 @@ impl ApiService {
         ));
         let usage = Arc::new(crate::usage::UsageService::new(
             store.paths().data_dir.join("agent-fixtures/.codex"),
+            store.paths().data_dir.join("usage"),
         ));
         Self {
             extensions,
@@ -104,7 +105,10 @@ impl ApiService {
             .map_err(|e| std::io::Error::other(e.message))?;
         let mut service = Self::new(application, store, emitter);
         service.extensions = extensions;
-        service.usage = Arc::new(crate::usage::UsageService::new(agent_home.join(".codex")));
+        service.usage = Arc::new(crate::usage::UsageService::new(
+            agent_home.join(".codex"),
+            service.store.paths().data_dir.join("usage"),
+        ));
         Ok(service)
     }
 
@@ -180,7 +184,9 @@ impl ApiService {
             .map_err(|e| std::io::Error::other(e.message))?;
         let mut service = Self::new(application, store, emitter);
         service.extensions = extensions;
-        service.usage = Arc::new(crate::usage::UsageService::production());
+        service.usage = Arc::new(crate::usage::UsageService::production(
+            service.store.paths().data_dir.join("usage"),
+        ));
         Ok(service)
     }
 

@@ -91,6 +91,7 @@ export function createMockTransport(
     codexUsage: vi.fn((request) =>
       ok({
         codexHome: "/home/test/.codex",
+        ledgerDir: "/home/test/data/usage",
         available: false,
         generatedAt: "2026-07-10T12:00:00Z",
         days: request.days,
