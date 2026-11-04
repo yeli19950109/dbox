@@ -62,6 +62,17 @@ It does not switch to the full release history or nightly builds. Without this
 option, prerelease tags are rejected; draft releases are always rejected.
 These optional fields leave existing DashBeam configurations unchanged.
 
+## Codex usage
+
+The **用量** page reads Codex session logs under `$CODEX_HOME` (default `~/.codex`) and
+shows exact per-request token usage by model and by day. Model names are normalized
+(`openai/GPT-5.4-2026-03-05` → `gpt-5.4`), sub-agent replays of parent history and
+duplicate archived copies are not counted twice, and compressed `*.jsonl.zst` sessions
+are read too. Counted requests are kept in `usage/codex-requests.jsonl` under dbox's data
+directory, so only new or changed session files are parsed and usage survives deleted
+session logs. Nothing is written to the Codex directory. Costs are not computed. See
+[ADR 0005](docs/adr/0005-codex-usage-statistics.md).
+
 ## Validation
 
 ```sh

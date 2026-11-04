@@ -88,6 +88,23 @@ export function createMockTransport(
     listMcpServers: vi.fn(() => ok({ revision: "missing", servers: [] })),
     scanSkillImports: vi.fn(() => ok({ candidates: [], errors: [], checkedAt: "" })),
     scanMcpImports: vi.fn(() => ok({ candidates: [], errors: [] })),
+    codexUsage: vi.fn((request) =>
+      ok({
+        codexHome: "/home/test/.codex",
+        ledgerDir: "/home/test/data/usage",
+        available: false,
+        generatedAt: "2026-07-10T12:00:00Z",
+        days: request.days,
+        filesScanned: 0,
+        sessions: 0,
+        totals: { requests: 0, inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        models: [],
+        daily: [],
+        deferred: [],
+        replayedRequests: 0,
+        duplicateRequests: 0,
+      }),
+    ),
     ...commandOverrides,
   } as ApiTransport["commands"];
 

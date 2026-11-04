@@ -36,6 +36,7 @@ export const commands = {
 	previewMcpOperation: (request: McpOperationRequest) => typedError<ExtensionPlan, ApiErrorDto>(__TAURI_INVOKE("preview_mcp_operation", { request })),
 	confirmExtensionOperation: (request: ConfirmExtensionRequest) => typedError<ExtensionStarted, ApiErrorDto>(__TAURI_INVOKE("confirm_extension_operation", { request })),
 	extensionOperationResult: (request: IdRequest) => typedError<ExtensionResult, ApiErrorDto>(__TAURI_INVOKE("extension_operation_result", { request })),
+	codexUsage: (request: CodexUsageRequest) => typedError<CodexUsageReport, ApiErrorDto>(__TAURI_INVOKE("codex_usage", { request })),
 };
 
 /** Events */
@@ -110,6 +111,37 @@ export type CheckUpdatesRequest = {
 	skillIds: string[],
 };
 
+export type CodexUsageReport = {
+	codexHome: string,
+	/**  Directory holding dbox's usage ledger. */
+	ledgerDir: string,
+	/**  Whether `codex_home` exists. */
+	available: boolean,
+	generatedAt: string,
+	days: number | null,
+	filesScanned: number,
+	sessions: number,
+	totals: TokenUsageDto,
+	/**  Sorted by total tokens, descending. */
+	models: ModelUsageDto[],
+	/**  Sorted by date, ascending. */
+	daily: DailyUsageDto[],
+	/**  Rollouts whose usage could not be attributed reliably and is excluded. */
+	deferred: DeferredUsageFileDto[],
+	/**  Sub-agent / fork requests skipped because they replay parent history. */
+	replayedRequests: number,
+	/**  Requests skipped because another copy of the rollout was counted. */
+	duplicateRequests: number,
+};
+
+export type CodexUsageRequest = {
+	/**
+	 *  Only count requests from the last N local days (today included); all
+	 *  history when omitted.
+	 */
+	days?: number | null,
+};
+
 export type CommandActionDto = {
 	label: string,
 	command: CommandSpecDto,
@@ -170,6 +202,17 @@ export type ConfirmRequestDto = {
 export type ConfirmResponseDto = {
 	execution: ExecutionResultDto,
 	snapshot: SnapshotDto,
+};
+
+export type DailyUsageDto = {
+	/**  Local calendar date, `YYYY-MM-DD`. */
+	date: string,
+	usage: TokenUsageDto,
+};
+
+export type DeferredUsageFileDto = {
+	path: string,
+	reason: string,
 };
 
 export type DeleteSourceRequest = {
@@ -358,6 +401,11 @@ export type McpSnapshot = {
 };
 
 export type McpTransport = "stdio" | "http" | "sse";
+
+export type ModelUsageDto = {
+	model: string,
+	usage: TokenUsageDto,
+};
 
 export type OperationStepView = {
 	targetId: string,
@@ -660,6 +708,17 @@ export type TargetResult = {
 	path: string,
 	status: string,
 	message: string,
+};
+
+/**  Token totals. Counts are JSON numbers (exact up to 2^53). */
+export type TokenUsageDto = {
+	requests: number,
+	/**  Total input tokens, including cached input. */
+	inputTokens: number | null,
+	cachedInputTokens: number | null,
+	cacheWriteInputTokens: number | null,
+	outputTokens: number | null,
+	totalTokens: number | null,
 };
 
 export type ToolDto = {
