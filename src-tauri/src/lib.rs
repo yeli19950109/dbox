@@ -13,6 +13,7 @@ pub mod mcp;
 pub mod persistence;
 pub mod providers;
 pub mod skills;
+pub mod usage;
 pub mod version;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

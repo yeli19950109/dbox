@@ -5,6 +5,7 @@ import ConfirmView from "../views/ConfirmView.vue";
 import SettingsView from "../views/SettingsView.vue";
 import McpView from "../views/McpView.vue";
 import SkillsView from "../views/SkillsView.vue";
+import UsageView from "../views/UsageView.vue";
 
 export const router = createRouter({
   history: createWebHashHistory(),
@@ -16,6 +17,7 @@ export const router = createRouter({
     { path: "/settings", name: "settings", component: SettingsView },
     { path: "/mcp", name: "mcp", component: McpView },
     { path: "/skills", name: "skills", component: SkillsView },
+    { path: "/usage", name: "usage", component: UsageView },
     { path: "/:pathMatch(.*)*", redirect: "/tools" },
   ],
 });

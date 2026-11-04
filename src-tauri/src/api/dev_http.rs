@@ -158,6 +158,7 @@ pub fn dev_http_router(service: Arc<ApiService>, event_bus: DevHttpEventBus) -> 
             "/__dbox_http/commands/extension_operation_result",
             post(extension_operation_result),
         )
+        .route("/__dbox_http/commands/codex_usage", post(codex_usage))
         .route("/__dbox_http/events", get(event_stream))
         .with_state(DevHttpState {
             service,
@@ -494,6 +495,19 @@ async fn extension_operation_result(
         tokio::task::spawn_blocking(move || service.result(&request.id))
             .await
             .unwrap_or_else(|_| Err(err("failed", "操作执行任务失败")))
+            .into(),
+    )
+}
+
+async fn codex_usage(
+    State(state): State<DevHttpState>,
+    Json(request): Json<crate::usage::CodexUsageRequest>,
+) -> Json<CommandResponse<crate::usage::CodexUsageReport>> {
+    let service = std::sync::Arc::clone(&state.service.usage);
+    Json(
+        tokio::task::spawn_blocking(move || service.codex_usage(request))
+            .await
+            .unwrap_or_else(|_| Err(err("failed", "读取 Codex 用量失败")))
             .into(),
     )
 }

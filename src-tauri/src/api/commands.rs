@@ -110,3 +110,15 @@ pub async fn save_manifest(
 ) -> Result<SavedManifestDto, ApiErrorDto> {
     state.service().save_manifest(request).await
 }
+
+#[tauri::command]
+#[specta::specta]
+pub async fn codex_usage(
+    state: State<'_, ApiState>,
+    request: crate::usage::CodexUsageRequest,
+) -> Result<crate::usage::CodexUsageReport, ApiErrorDto> {
+    let service = std::sync::Arc::clone(&state.service().usage);
+    tokio::task::spawn_blocking(move || service.codex_usage(request))
+        .await
+        .map_err(|_| crate::extensions::err("failed", "读取 Codex 用量失败"))?
+}

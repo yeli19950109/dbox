@@ -1,5 +1,6 @@
 import type {
   AgentTarget,
+  CodexUsageReport,
   Diagnostic,
   ExtensionBackup,
   ExtensionPlan,
@@ -270,6 +271,8 @@ const httpCommands = {
   extensionOperationResult: (
     request: Parameters<typeof generatedCommands.extensionOperationResult>[0],
   ) => command<ExtensionResult>("extension_operation_result", request),
+  codexUsage: (request: Parameters<typeof generatedCommands.codexUsage>[0]) =>
+    command<CodexUsageReport>("codex_usage", request),
 } satisfies typeof generatedCommands;
 
 const httpEvents = {
