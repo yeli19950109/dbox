@@ -22,6 +22,7 @@
           Skills
         </RouterLink>
         <RouterLink to="/mcp"><span aria-hidden="true">⊞</span>MCP</RouterLink>
+        <RouterLink to="/usage"><span aria-hidden="true">◔</span>用量</RouterLink>
         <RouterLink to="/settings">
           <span aria-hidden="true">⌘</span>
           设置

@@ -38,6 +38,15 @@ Checks use the public GitHub API without a token; API rate limits are shown as c
 failures. No update commands, downloads of release assets, or application changes are
 performed.
 
+## Codex usage
+
+The **用量** page reads Codex session logs under `$CODEX_HOME` (default `~/.codex`) and
+shows exact per-request token usage by model and by day. Model names are normalized
+(`openai/GPT-5.4-2026-03-05` → `gpt-5.4`), sub-agent replays of parent history and
+duplicate archived copies are not counted twice, and compressed `*.jsonl.zst` sessions
+are read too. Nothing is written to the Codex directory. Costs are not computed. See
+[ADR 0005](docs/adr/0005-codex-usage-statistics.md).
+
 ## Validation
 
 ```sh

@@ -35,6 +35,7 @@ use super::events::{
 
 pub struct ApiService {
     pub extensions: Arc<crate::extensions::ExtensionService>,
+    pub usage: Arc<crate::usage::UsageService>,
     application: Arc<ApplicationService>,
     store: Arc<PersistenceStore>,
     emitter: Arc<dyn ApiEventEmitter>,
@@ -55,8 +56,12 @@ impl ApiService {
             agents,
             Arc::clone(&emitter),
         ));
+        let usage = Arc::new(crate::usage::UsageService::new(
+            store.paths().data_dir.join("agent-fixtures/.codex"),
+        ));
         Self {
             extensions,
+            usage,
             application,
             store,
             emitter,
@@ -91,7 +96,7 @@ impl ApiService {
         )?);
         let extensions = Arc::new(crate::extensions::ExtensionService::new(
             Arc::clone(&store),
-            crate::agents::AgentRegistry::isolated(agent_home),
+            crate::agents::AgentRegistry::isolated(agent_home.clone()),
             Arc::clone(&emitter),
         ));
         extensions
@@ -99,6 +104,7 @@ impl ApiService {
             .map_err(|e| std::io::Error::other(e.message))?;
         let mut service = Self::new(application, store, emitter);
         service.extensions = extensions;
+        service.usage = Arc::new(crate::usage::UsageService::new(agent_home.join(".codex")));
         Ok(service)
     }
 
@@ -174,6 +180,7 @@ impl ApiService {
             .map_err(|e| std::io::Error::other(e.message))?;
         let mut service = Self::new(application, store, emitter);
         service.extensions = extensions;
+        service.usage = Arc::new(crate::usage::UsageService::production());
         Ok(service)
     }
 

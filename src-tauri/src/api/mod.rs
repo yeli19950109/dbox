@@ -52,7 +52,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             validate_mcp_server,
             preview_mcp_operation,
             confirm_extension_operation,
-            extension_operation_result
+            extension_operation_result,
+            codex_usage
         ])
         .events(collect_events![
             RefreshProgressEventDto,
