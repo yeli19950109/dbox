@@ -35,11 +35,11 @@
         <h2>未找到 Codex 目录</h2>
         <p class="muted">
           {{ report.codexHome }} 不存在。安装并使用 Codex 后会在这里显示用量；
-          可通过 CODEX_HOME 环境变量指定其他位置。
+          可通过 CODEX_HOME 环境变量指定其他位置。已记录的历史用量仍会保留。
         </p>
       </section>
 
-      <template v-if="report && report.available">
+      <template v-if="report && (report.available || report.totals.requests > 0)">
         <section class="usage-stats" aria-label="用量汇总">
           <div class="usage-stat">
             <span>请求数</span>
@@ -121,7 +121,8 @@
         </details>
 
         <p class="muted usage-footnote">
-          扫描 {{ report.codexHome }} 下 {{ formatCount(report.filesScanned) }} 个会话文件；
+          扫描 {{ report.codexHome }} 下 {{ formatCount(report.filesScanned) }} 个会话文件，
+          已统计的请求保存在 {{ report.ledgerDir }}，删除会话日志后仍会保留；
           跳过子代理重放的父会话请求 {{ formatCount(report.replayedRequests) }} 次、
           重复副本 {{ formatCount(report.duplicateRequests) }} 次。
         </p>

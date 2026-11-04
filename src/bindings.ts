@@ -113,6 +113,8 @@ export type CheckUpdatesRequest = {
 
 export type CodexUsageReport = {
 	codexHome: string,
+	/**  Directory holding dbox's usage ledger. */
+	ledgerDir: string,
 	/**  Whether `codex_home` exists. */
 	available: boolean,
 	generatedAt: string,

@@ -19,6 +19,7 @@ function usage(requests: number, input: number, cached: number, output: number) 
 
 const report: CodexUsageReport = {
   codexHome: "/home/test/.codex",
+  ledgerDir: "/home/test/data/usage",
   available: true,
   generatedAt: "2026-07-10T12:00:00Z",
   days: 30,
