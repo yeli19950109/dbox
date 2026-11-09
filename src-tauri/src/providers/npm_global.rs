@@ -528,14 +528,14 @@ impl ToolProvider for NpmGlobalProvider {
             .get(&name)
             .filter(|list| !list.is_empty())
         {
-            // An explicit CLI flag overrides .npmrc, so preserve its effective list.
+            // A CLI flag overrides .npmrc. npm config get prints plain text even
+            // with --json, whereas config list returns the typed effective values.
             let output = self
                 .run_required(
                     ProviderOperation::PlanUpdate,
-                    &["config", "get", "allow-scripts", "--global", "--json"],
+                    &["config", "list", "--global", "--json"],
                 )
                 .await?;
-            let raw = String::from_utf8_lossy(&output.stdout);
             let invalid_policy = || {
                 ProviderError::new(
                     self.id.clone(),
@@ -544,21 +544,18 @@ impl ToolProvider for NpmGlobalProvider {
                     "无法读取 npm allow-scripts 配置，请检查配置后重试",
                 )
             };
-            let configured: Value = if raw.trim() == "undefined" {
-                Value::Null
-            } else {
-                serde_json::from_str(&raw).map_err(|_| invalid_policy())?
-            };
+            let config: serde_json::Map<String, Value> =
+                serde_json::from_slice(&output.stdout).map_err(|_| invalid_policy())?;
             let mut entries = allowed.clone();
-            match configured {
-                Value::String(value) => entries.extend(value.split(',').map(str::to_owned)),
-                Value::Array(values) => {
+            match config.get("allow-scripts") {
+                Some(Value::String(value)) => entries.extend(value.split(',').map(str::to_owned)),
+                Some(Value::Array(values)) => {
                     for value in values {
                         let value = value.as_str().ok_or_else(invalid_policy)?;
                         entries.extend(value.split(',').map(str::to_owned));
                     }
                 }
-                Value::Null => {}
+                None | Some(Value::Null) => {}
                 _ => return Err(invalid_policy()),
             }
             entries = entries

@@ -20,8 +20,8 @@ case "$1" in
     printf '%s\n' "$fixture_dir/prefix/lib/node_modules"
     ;;
   config)
-    [ "$2" = 'get' ] && [ "$3" = 'allow-scripts' ] || exit 91
-    printf '"protobufjs,koffi"\n'
+    [ "$2" = 'list' ] && [ "$3" = '--global' ] && [ "$4" = '--json' ] || exit 91
+    command cat "$fixture_dir/config.json"
     ;;
   ls)
     if [ -f "$fixture_dir/list.json" ]; then

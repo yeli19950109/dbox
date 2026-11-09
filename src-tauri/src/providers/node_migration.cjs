@@ -20,11 +20,6 @@ function npm(args, capture = true) {
   return result.stdout;
 }
 
-function config(name) {
-  const value = npm(['config', 'get', name, '--global', '--json']).trim();
-  return value === 'undefined' || value === '' ? null : JSON.parse(value);
-}
-
 function allowList(value) {
   if (value == null) return [];
   const values = Array.isArray(value) ? value : [value];
@@ -47,7 +42,9 @@ function snapshot() {
   if (!listing || typeof listing !== 'object' || Array.isArray(listing) || listing.error) throw new Error('无法读取全局 npm 包清单');
   if (listing.dependencies !== undefined && (!listing.dependencies || typeof listing.dependencies !== 'object' || Array.isArray(listing.dependencies))) throw new Error('全局 npm 包清单格式无效');
   const policies = JSON.parse(policyJson);
-  const configured = allowList(config('allow-scripts'));
+  const config = JSON.parse(npm(['config', 'list', '--global', '--json']));
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('无法读取 npm 配置');
+  const configured = allowList(config['allow-scripts']);
   const packages = Object.entries(listing.dependencies || {}).map(([name, entry]) => {
     if (!validName(name) || !entry || typeof entry.version !== 'string') throw new Error(`全局 npm 包清单不完整：${name}`);
     const installed = path.join(root, name);
@@ -60,7 +57,7 @@ function snapshot() {
   });
   const manifest = {
     schemaVersion: 1, capturedAt: new Date().toISOString(), previousPrefix: prefix,
-    configuredAllowScripts: configured, ignoreScripts: config('ignore-scripts') === true,
+    configuredAllowScripts: configured, ignoreScripts: config['ignore-scripts'] === true,
     packages, results: [],
   };
   save(manifest, true);

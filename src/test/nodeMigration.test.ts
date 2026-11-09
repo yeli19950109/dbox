@@ -27,7 +27,8 @@ function fixture() {
         if (config.listFail) process.exit(1);
         console.log(JSON.stringify({ dependencies: config.dependencies }));
       } else if (args[0] === 'config') {
-        console.log(JSON.stringify(args[2] === 'allow-scripts' ? config.allow : config.ignore));
+        if (args[1] !== 'list' || !args.includes('--global') || !args.includes('--json')) process.exit(64);
+        console.log(JSON.stringify({ 'allow-scripts': config.allow, 'ignore-scripts': config.ignore }));
       } else if (args[0] === 'install') {
         const spec = args[args.indexOf('--') + 1];
         if (spec === config.fail) process.exit(7);
@@ -69,6 +70,15 @@ describe("global Node migration", () => {
     expect(f.run("restore").status).toBe(0);
     const args = f.calls(f.next)[0]!;
     expect(args.some(arg => arg.startsWith("--allow-scripts") || arg.includes("dangerously"))).toBe(false);
+  });
+
+  it("restores saved CLI approvals when npm has an empty allow-scripts list", () => {
+    const f = fixture(); f.inventory(["@capacitor/assets", "pi"], [""]);
+    expect(f.run("snapshot", { "@capacitor/assets": ["sharp"] }).status).toBe(0);
+    expect(f.run("restore").status).toBe(0);
+    const [assets, pi] = f.calls(f.next);
+    expect(assets).toContain("--allow-scripts=sharp");
+    expect(pi?.some(arg => arg.startsWith("--allow-scripts="))).toBe(false);
   });
 
   it("stops before update when inventory fails and refuses the wrong source runtime", () => {

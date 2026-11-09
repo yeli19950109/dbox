@@ -185,33 +185,43 @@ async fn saved_cli_script_policy_is_combined_with_npm_config_in_the_plan() {
         fake.temporary.path().join("data"),
         fake.temporary.path().join("logs"),
     );
-    let actions = provider
-        .plan_update_with_actions(
-            ProviderUpdateRequest {
-                installation_id: installed.id,
-                component_id: ComponentId::new("core").unwrap(),
-                strategy_id: StrategyId::new("provider-default").unwrap(),
-                target_version: None,
-            },
+    let request = ProviderUpdateRequest {
+        installation_id: installed.id,
+        component_id: ComponentId::new("core").unwrap(),
+        strategy_id: StrategyId::new("provider-default").unwrap(),
+        target_version: None,
+    };
+    let config_path = fake.temporary.path().join("config.json");
+    let plan = || {
+        provider.plan_update_with_actions(
+            request.clone(),
             ProviderActionContext {
                 paths: &paths,
                 settings: &settings,
             },
         )
-        .await
-        .unwrap();
-    assert!(actions
-        .plan
-        .args
-        .contains(&"--allow-scripts=koffi,node-pty,protobufjs".into()));
-    let separator = actions
-        .plan
-        .args
-        .iter()
-        .position(|arg| arg == "--")
-        .unwrap();
-    assert!(actions.plan.args[..separator].contains(&"--strict-allow-scripts".into()));
-    assert_eq!(actions.plan.args[separator + 1], "@deepseek-ai/dsh@latest");
+    };
+    for (config, expected) in [
+        (json!({}), "koffi,node-pty"),
+        (json!({"allow-scripts": [""]}), "koffi,node-pty"),
+        (
+            json!({"allow-scripts": "protobufjs,koffi"}),
+            "koffi,node-pty,protobufjs",
+        ),
+        (
+            json!({"allow-scripts": ["protobufjs", "koffi"]}),
+            "koffi,node-pty,protobufjs",
+        ),
+    ] {
+        fs::write(&config_path, config.to_string()).unwrap();
+        let args = plan().await.unwrap().plan.args;
+        let separator = args.iter().position(|arg| arg == "--").unwrap();
+        assert!(args[..separator].contains(&format!("--allow-scripts={expected}")));
+        assert!(args[..separator].contains(&"--strict-allow-scripts".into()));
+        assert_eq!(args[separator + 1], "@deepseek-ai/dsh@latest");
+    }
+    fs::write(config_path, r#"{"allow-scripts": [false]}"#).unwrap();
+    assert!(matches!(plan().await, Err(error) if error.summary.contains("allow-scripts")));
 }
 
 #[tokio::test]
