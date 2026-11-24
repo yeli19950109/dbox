@@ -58,6 +58,7 @@ export function createMockTransport(
   }
 
   const snapshot = snapshotWithTools();
+  let llamaApiKey: string | null = null;
   const baseCommands = {
     snapshot: vi.fn(() => ok(snapshot)),
     refresh: vi.fn(() => ok(snapshot)),
@@ -93,6 +94,11 @@ export function createMockTransport(
     llamaInstall: vi.fn(),
     llamaRemove: vi.fn(() => ok(null)),
     llamaChooseModel: vi.fn(() => ok(null)),
+    llamaReadApiKey: vi.fn(() => ok(llamaApiKey)),
+    llamaSaveApiKey: vi.fn((value: string) => {
+      llamaApiKey = value || null;
+      return ok(null);
+    }),
     codexUsage: vi.fn((request) =>
       ok({
         codexHome: "/home/test/.codex",

@@ -64,9 +64,15 @@ Llama.app owns the binaries and libraries directly under `~/.llama-app/`.
 
 Select an installed version, choose a GGUF model with the macOS file picker,
 and configure the host, port, API key and other server options. Copy the generated
-`llama-server` command and run it in your terminal. The page remembers the
-model and ordinary options. An API key stays in memory while the page is open
-and is included when you copy the command.
+`llama-server` command and run it in your terminal. All installed builds share
+the same launch settings. The model path, host, port and advanced options are
+saved automatically and restored when you reopen DBox. Click **保存密钥** to
+store or replace the API key in macOS Keychain. To remove it, empty the field
+and click **清除已保存密钥**. The preview masks the key by default, and the copied
+command includes its full value.
+
+In browser development mode, the key is stored in the browser origin's
+IndexedDB using Web Crypto. The desktop app uses its own Keychain entry.
 
 The [optional GitHub Releases provider](examples/providers/llama-cpp.toml) can
 still check the semantic version of a separately installed CLI. Homebrew tracks

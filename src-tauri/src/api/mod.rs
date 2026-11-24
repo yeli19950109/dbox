@@ -3,6 +3,8 @@ mod extension_commands;
 pub use extension_commands::*;
 mod llama_commands;
 pub use llama_commands::*;
+mod llama_credentials;
+pub use llama_credentials::*;
 #[cfg(all(debug_assertions, feature = "dev-http"))]
 mod dev_http;
 mod dto;
@@ -60,7 +62,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             llama_releases,
             llama_install,
             llama_remove,
-            llama_choose_model
+            llama_choose_model,
+            llama_read_api_key,
+            llama_save_api_key
         ])
         .events(collect_events![
             RefreshProgressEventDto,

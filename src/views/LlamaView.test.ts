@@ -18,6 +18,11 @@ function button(wrapper: VueWrapper, text: string) {
   if (!match) throw new Error(`Button missing: ${text}`);
   return match;
 }
+function deferred<T>() {
+  let resolve!: (result: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
 
 async function render(overrides: Partial<ApiTransport["commands"]> = {}) {
   const mock = createMockTransport({
@@ -94,6 +99,102 @@ describe("llama.cpp", () => {
     expect(commands.llamaRemove).toHaveBeenCalledWith({ tag: other.tag });
     expect(wrapper.find('input[aria-label="选择 b12646"]').exists()).toBe(false);
     expect(wrapper.findAll('input[type="radio"]')).toHaveLength(2);
+    wrapper.unmount();
+  });
+
+  it("restores the same saved model, options and key on switch and remount, and can clear the key", async () => {
+    window.localStorage.setItem("dbox.llama.command", JSON.stringify({
+      model: "/Models/existing.gguf", host: "localhost", port: "9310", context: "2048",
+    }));
+    const { wrapper, commands } = await render();
+    expect(wrapper.text()).toContain("所有版本共用");
+    const keyInput = wrapper.get("#llama-api-key");
+    await keyInput.setValue("saved-key");
+    await button(wrapper, "保存密钥").trigger("click");
+    await flushPromises();
+    expect(commands.llamaSaveApiKey).toHaveBeenCalledWith("saved-key");
+    expect(wrapper.text()).toContain("密钥已保存。");
+    await wrapper.get('input[aria-label="选择 b12644"]').setValue(true);
+    expect(commands.llamaReadApiKey).toHaveBeenCalledTimes(1);
+    expect(wrapper.get("pre").text()).toContain(old.serverPath);
+    expect(wrapper.get("pre").text()).not.toContain("saved-key");
+    wrapper.unmount();
+
+    setActivePinia(createPinia());
+    const reopened = mount(LlamaView);
+    await flushPromises();
+    expect(commands.llamaReadApiKey).toHaveBeenCalledTimes(2);
+    expect((reopened.get("#llama-api-key").element as HTMLInputElement).value).toBe("saved-key");
+    await button(reopened, "复制命令").trigger("click");
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      `${old.serverPath} -m /Models/existing.gguf --host localhost --port 9310 --api-key saved-key --ctx-size 2048`,
+    );
+    expect(window.localStorage.getItem("dbox.llama.command")).not.toContain("saved-key");
+    await reopened.get("#llama-api-key").setValue("");
+    await button(reopened, "清除已保存密钥").trigger("click");
+    await flushPromises();
+    expect(commands.llamaSaveApiKey).toHaveBeenLastCalledWith("");
+    expect(reopened.text()).toContain("已清除保存的密钥。");
+    expect(reopened.get("pre").text()).not.toContain("--api-key");
+    reopened.unmount();
+    const cleared = mount(LlamaView);
+    await flushPromises();
+    expect((cleared.get("#llama-api-key").element as HTMLInputElement).value).toBe("");
+    expect(commands.llamaSaveApiKey).toHaveBeenCalledTimes(2);
+    cleared.unmount();
+  });
+
+  it("preserves edits on a late read and waits for a pending rotation when returning to the page", async () => {
+    const read = deferred<Awaited<ReturnType<typeof ok<string | null>>>>();
+    const write = deferred<void>();
+    let stored = "old-key";
+    const { wrapper, commands } = await render({
+      llamaReadApiKey: vi.fn().mockReturnValueOnce(read.promise).mockImplementation(() => ok(stored)),
+      llamaSaveApiKey: vi.fn(async (value: string) => {
+        await write.promise;
+        stored = value;
+        return ok(null);
+      }),
+    });
+    await wrapper.get("#llama-api-key").setValue("new-key");
+    expect(button(wrapper, "保存密钥").attributes("disabled")).toBeDefined();
+    read.resolve({ status: "ok", data: stored });
+    await flushPromises();
+    expect((wrapper.get("#llama-api-key").element as HTMLInputElement).value).toBe("new-key");
+    await button(wrapper, "保存密钥").trigger("click");
+    expect(wrapper.text()).toContain("正在保存密钥");
+    wrapper.unmount();
+    const reopened = mount(LlamaView);
+    await flushPromises();
+    expect(commands.llamaReadApiKey).toHaveBeenCalledTimes(1);
+    write.resolve();
+    await flushPromises();
+    expect((reopened.get("#llama-api-key").element as HTMLInputElement).value).toBe("new-key");
+    expect(commands.llamaReadApiKey).toHaveBeenCalledTimes(2);
+    reopened.unmount();
+  });
+
+  it("keeps copy opt-in after a failed key read and keeps the editable draft after a failed save", async () => {
+    window.localStorage.setItem("dbox.llama.command", JSON.stringify({ model: "/Models/test.gguf" }));
+    const { wrapper, commands } = await render({
+      llamaReadApiKey: vi.fn(() => apiError("unavailable", "读取被拒绝")),
+      llamaSaveApiKey: vi.fn().mockImplementationOnce(() => apiError("unavailable", "写入被拒绝")).mockImplementation(() => ok(null)),
+    });
+    expect(wrapper.text()).toContain("读取被拒绝");
+    expect(button(wrapper, "复制命令").attributes("disabled")).toBeDefined();
+    await button(wrapper, "本次不使用密钥").trigger("click");
+    expect(wrapper.get("pre").text()).not.toContain("--api-key");
+    expect(commands.llamaSaveApiKey).not.toHaveBeenCalled();
+    await wrapper.get("#llama-api-key").setValue("draft-for-retry");
+    await button(wrapper, "保存密钥").trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("写入被拒绝");
+    expect((wrapper.get("#llama-api-key").element as HTMLInputElement).value).toBe("draft-for-retry");
+    expect(button(wrapper, "保存密钥").attributes("disabled")).toBeUndefined();
+    await button(wrapper, "保存密钥").trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("密钥已保存。");
+    expect(commands.llamaSaveApiKey).toHaveBeenCalledTimes(2);
     wrapper.unmount();
   });
 

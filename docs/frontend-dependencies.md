@@ -14,6 +14,7 @@
 | `@tauri-apps/api` | 2.11.1 | Apache-2.0 OR MIT | 项目基线 | 只由生成 bindings 使用的 Tauri transport |
 | `@tanstack/vue-virtual` | 3.13.36 | MIT | 项目基线 | 500 项工具列表与持续增长日志的 DOM 回收 |
 | `@vueuse/core` | 14.4.0 | MIT | 项目基线 | 搜索 debounce、日志 paint throttle 与运行耗时刷新 |
+| `idb-keyval` | 6.2.2 | Apache-2.0 | 浏览器 IndexedDB | 保存浏览器开发模式的加密 llama.cpp API Key |
 | `vitest` | 4.1.11 | MIT | `^20.0.0 \|\| ^22.0.0 \|\| >=24.0.0` | 前端测试 runner |
 | `@vue/test-utils` | 2.5.0 | MIT | 项目基线 | Vue 组件与交互测试 |
 | `axe-core` | 4.13.0 | MPL-2.0 | `>=4` | 组件可访问性、可访问名称及 color-contrast 规则回归 |

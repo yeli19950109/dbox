@@ -3,12 +3,16 @@ import { computed, ref, watch } from "vue";
 import { useLocalStorage } from "@vueuse/core";
 import type { LlamaInstalledVersion } from "../bindings";
 import { errorMessage, getTransport, unwrapCommand } from "../api/transport";
+import { useLlamaApiKey } from "../stores/llamaApiKey";
 
 const props = defineProps<{ version?: LlamaInstalledVersion }>();
 const config = useLocalStorage("dbox.llama.command", {
   model: "", host: "127.0.0.1", port: "8080", context: "", threads: "", gpuLayers: "",
-}, { mergeDefaults: true });
-const apiKey = ref("");
+}, { mergeDefaults: true, flush: "sync" });
+const {
+  key: apiKey, ready: keyReady, canSave: canSaveKey, readError: keyReadError,
+  saveError: keySaveError, status: keyStatus, read: readKey, save: saveKey,
+} = useLlamaApiKey();
 const reveal = ref(false);
 const choosing = ref(false);
 const pickerError = ref("");
@@ -42,7 +46,7 @@ function shellWord(value: string) {
 }
 
 function command(key: string) {
-  if (!props.version || !config.value.model || validation.value) return "";
+  if (!props.version || !config.value.model || validation.value || !keyReady.value) return "";
   const args = [
     props.version.serverPath, "-m", config.value.model,
     "--host", config.value.host.trim(), "--port", config.value.port,
@@ -90,7 +94,7 @@ async function copyCommand() {
   <section class="extension-panel command-panel" aria-labelledby="llama-config-title">
     <header class="extension-heading">
       <h2 id="llama-config-title">启动配置</h2>
-      <code v-if="version" class="selected-version">{{ version.tag }}</code>
+      <small class="muted">所有版本共用</small>
     </header>
     <div class="model-field" role="group" aria-labelledby="model-field-label">
       <span id="model-field-label">GGUF 模型</span>
@@ -110,7 +114,19 @@ async function copyCommand() {
     <div class="key-field">
       <input id="llama-api-key" v-model="apiKey" :type="reveal ? 'text' : 'password'" autocomplete="off" spellcheck="false" placeholder="输入 API Key" />
       <button class="text-button" :aria-pressed="reveal" @click="reveal = !reveal">{{ reveal ? "隐藏密钥" : "显示密钥" }}</button>
+      <button class="button secondary compact" :disabled="!canSaveKey" @click="saveKey">
+        {{ !apiKey && canSaveKey ? "清除已保存密钥" : "保存密钥" }}
+      </button>
     </div>
+    <p v-if="keyStatus" class="key-status muted" role="status">{{ keyStatus }}</p>
+    <div v-if="keyReadError" class="inline-error key-error" role="alert">
+      <span>读取密钥失败。{{ keyReadError }}</span>
+      <div class="extension-actions">
+        <button class="text-button" @click="readKey">重试读取</button>
+        <button v-if="!keyReady" class="text-button" @click="apiKey = ''">本次不使用密钥</button>
+      </div>
+    </div>
+    <p v-if="keySaveError" class="inline-error" role="alert">保存密钥失败。{{ keySaveError }}</p>
     <details>
       <summary>更多参数</summary>
       <div class="field-grid three advanced-fields">
@@ -125,7 +141,7 @@ async function copyCommand() {
     </details>
     <section class="command-output" aria-labelledby="command-title">
       <header class="extension-heading">
-        <h3 id="command-title">运行命令</h3>
+        <h3 id="command-title">运行命令 <code v-if="version" class="selected-version">{{ version.tag }}</code></h3>
         <button class="button primary compact" :disabled="!fullCommand" @click="copyCommand">复制命令</button>
       </header>
       <p v-if="validation" class="inline-warning" role="alert">{{ validation }}</p>
@@ -151,6 +167,8 @@ async function copyCommand() {
 .model-picker button, .key-field button { flex-shrink: 0; }
 .key-field { margin-top: -9px; }
 .key-field input { flex: 1; }
+.key-status { font-size: 12px; }
+.key-error { flex-wrap: wrap; }
 .advanced-fields { margin-top: 10px; }
 .advanced-field { display: grid; gap: 7px; }
 .advanced-field > div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px; }

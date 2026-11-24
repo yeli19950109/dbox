@@ -1,7 +1,7 @@
 {
   "name": "dbox",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "scripts": {
     "version:sync": "node scripts/sync-version.mjs",
@@ -21,6 +21,7 @@
     "@tanstack/vue-virtual": "3.13.36",
     "@tauri-apps/api": "2.11.1",
     "@vueuse/core": "14.4.0",
+    "idb-keyval": "6.2.2",
     "pinia": "4.0.3",
     "vue": "3.5.42",
     "vue-router": "5.3.0"

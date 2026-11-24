@@ -284,6 +284,14 @@ const httpCommands = {
   llamaRemove: (request: Parameters<typeof generatedCommands.llamaRemove>[0]) =>
     command<null>("llama_remove", request),
   llamaChooseModel: () => command<string | null>("llama_choose_model"),
+  llamaReadApiKey: async () => {
+    const { readBrowserLlamaApiKey } = await import("./browserLlamaApiKey");
+    return { status: "ok" as const, data: await readBrowserLlamaApiKey() };
+  },
+  llamaSaveApiKey: async (value: string) => {
+    const { saveBrowserLlamaApiKey } = await import("./browserLlamaApiKey");
+    return { status: "ok" as const, data: await saveBrowserLlamaApiKey(value) };
+  },
 } satisfies typeof generatedCommands;
 
 const httpEvents = {
