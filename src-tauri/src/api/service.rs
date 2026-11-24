@@ -36,6 +36,7 @@ use super::events::{
 pub struct ApiService {
     pub extensions: Arc<crate::extensions::ExtensionService>,
     pub usage: Arc<crate::usage::UsageService>,
+    pub(super) llama_root: PathBuf,
     application: Arc<ApplicationService>,
     store: Arc<PersistenceStore>,
     emitter: Arc<dyn ApiEventEmitter>,
@@ -63,6 +64,7 @@ impl ApiService {
         Self {
             extensions,
             usage,
+            llama_root: store.paths().data_dir.join("agent-fixtures/.llama-app"),
             application,
             store,
             emitter,
@@ -105,6 +107,7 @@ impl ApiService {
             .map_err(|e| std::io::Error::other(e.message))?;
         let mut service = Self::new(application, store, emitter);
         service.extensions = extensions;
+        service.llama_root = agent_home.join(".llama-app");
         service.usage = Arc::new(crate::usage::UsageService::new(
             agent_home.join(".codex"),
             service.store.paths().data_dir.join("usage"),
@@ -184,6 +187,9 @@ impl ApiService {
             .map_err(|e| std::io::Error::other(e.message))?;
         let mut service = Self::new(application, store, emitter);
         service.extensions = extensions;
+        service.llama_root = dirs::home_dir()
+            .ok_or_else(|| std::io::Error::other("无法定位用户主目录"))?
+            .join(".llama-app");
         service.usage = Arc::new(crate::usage::UsageService::production(
             service.store.paths().data_dir.join("usage"),
         ));

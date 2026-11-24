@@ -9,6 +9,7 @@ pub mod domain;
 pub mod environment;
 pub mod executor;
 pub mod extensions;
+pub mod llama;
 pub mod mcp;
 pub mod persistence;
 pub mod providers;

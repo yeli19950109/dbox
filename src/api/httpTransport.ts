@@ -6,6 +6,9 @@ import type {
   ExtensionPlan,
   ExtensionResult,
   ExtensionStarted,
+  LlamaInstalledVersion,
+  LlamaInventory,
+  LlamaReleasePage,
   McpScan,
   McpSnapshot,
   SearchSkill,
@@ -273,6 +276,14 @@ const httpCommands = {
   ) => command<ExtensionResult>("extension_operation_result", request),
   codexUsage: (request: Parameters<typeof generatedCommands.codexUsage>[0]) =>
     command<CodexUsageReport>("codex_usage", request),
+  llamaInventory: () => command<LlamaInventory>("llama_inventory"),
+  llamaReleases: (request: Parameters<typeof generatedCommands.llamaReleases>[0]) =>
+    command<LlamaReleasePage>("llama_releases", request),
+  llamaInstall: (request: Parameters<typeof generatedCommands.llamaInstall>[0]) =>
+    command<LlamaInstalledVersion>("llama_install", request),
+  llamaRemove: (request: Parameters<typeof generatedCommands.llamaRemove>[0]) =>
+    command<null>("llama_remove", request),
+  llamaChooseModel: () => command<string | null>("llama_choose_model"),
 } satisfies typeof generatedCommands;
 
 const httpEvents = {

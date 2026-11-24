@@ -13,6 +13,7 @@
           <span aria-hidden="true">⌁</span>
           工具
         </RouterLink>
+        <RouterLink to="/llama"><span aria-hidden="true">◇</span>llama.cpp</RouterLink>
         <RouterLink to="/runs">
           <span aria-hidden="true">↗</span>
           运行记录

@@ -649,17 +649,20 @@ dependencies = [
 
 [[package]]
 name = "dbox"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "atomic-write-file",
  "axum",
  "blake3",
+ "block2",
  "bstr",
  "bytes",
  "chrono",
  "dirs",
  "fix-path-env",
+ "objc2-app-kit",
+ "objc2-foundation",
  "plist",
  "process-wrap",
  "regex",
@@ -670,6 +673,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_yaml_ng",
+ "sha2",
  "shell-quote",
  "specta",
  "specta-typescript",

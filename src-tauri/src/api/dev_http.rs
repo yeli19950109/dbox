@@ -15,7 +15,9 @@ use tokio_stream::{Stream, StreamExt};
 
 use super::dto::*;
 use super::events::{ApiEvent, ApiEventEmitter};
+use super::llama_commands::{self, llama_error, LlamaReleaseRequest, LlamaVersionRequest};
 use super::service::ApiService;
+use crate::llama::{self, LlamaInstalledVersion, LlamaInventory, LlamaReleasePage};
 
 pub const DEV_HTTP_PORT: u16 = 1430;
 pub const DEV_HTTP_ADDR: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, DEV_HTTP_PORT);
@@ -159,6 +161,17 @@ pub fn dev_http_router(service: Arc<ApiService>, event_bus: DevHttpEventBus) -> 
             post(extension_operation_result),
         )
         .route("/__dbox_http/commands/codex_usage", post(codex_usage))
+        .route(
+            "/__dbox_http/commands/llama_inventory",
+            post(llama_inventory),
+        )
+        .route("/__dbox_http/commands/llama_releases", post(llama_releases))
+        .route("/__dbox_http/commands/llama_install", post(llama_install))
+        .route("/__dbox_http/commands/llama_remove", post(llama_remove))
+        .route(
+            "/__dbox_http/commands/llama_choose_model",
+            post(llama_choose_model),
+        )
         .route("/__dbox_http/events", get(event_stream))
         .with_state(DevHttpState {
             service,
@@ -200,6 +213,93 @@ fn dev_http_address(port: u16) -> SocketAddrV4 {
 
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "ok" }))
+}
+
+async fn llama_inventory(
+    State(state): State<DevHttpState>,
+) -> Json<CommandResponse<LlamaInventory>> {
+    Json(
+        llama::inventory(&state.service.llama_root)
+            .await
+            .map_err(llama_error)
+            .into(),
+    )
+}
+
+async fn llama_releases(
+    Json(request): Json<LlamaReleaseRequest>,
+) -> Json<CommandResponse<LlamaReleasePage>> {
+    Json(llama_commands::llama_releases(request).await.into())
+}
+
+async fn llama_install(
+    State(state): State<DevHttpState>,
+    Json(request): Json<LlamaVersionRequest>,
+) -> Json<CommandResponse<LlamaInstalledVersion>> {
+    Json(
+        llama::install(&state.service.llama_root, &request.tag)
+            .await
+            .map_err(llama_error)
+            .into(),
+    )
+}
+
+async fn llama_remove(
+    State(state): State<DevHttpState>,
+    Json(request): Json<LlamaVersionRequest>,
+) -> Json<CommandResponse<()>> {
+    Json(
+        llama::remove(&state.service.llama_root, &request.tag)
+            .await
+            .map_err(llama_error)
+            .into(),
+    )
+}
+
+async fn llama_choose_model(
+    Json(_): Json<serde_json::Value>,
+) -> Json<CommandResponse<Option<String>>> {
+    Json(choose_dev_model().await.into())
+}
+
+#[cfg(target_os = "macos")]
+async fn choose_dev_model() -> Result<Option<String>, ApiErrorDto> {
+    let _guard = llama_commands::lock_model_picker()?;
+    // The headless HTTP bridge needs a separate AppKit event loop to show a system panel.
+    const PICK_GGUF: &str = r#"
+        ObjC.import('AppKit');
+        const app = $.NSApplication.sharedApplication;
+        app.setActivationPolicy($.NSApplicationActivationPolicyAccessory);
+        app.activateIgnoringOtherApps(true);
+        const panel = $.NSOpenPanel.openPanel;
+        panel.title = '选择 GGUF 模型';
+        panel.allowedFileTypes = ['gguf'];
+        const accepted = Number(panel.runModal) === Number($.NSModalResponseOK);
+        JSON.stringify(accepted ? ObjC.unwrap(panel.URL.path) : null);
+    "#;
+    let output = tokio::process::Command::new("/usr/bin/osascript")
+        .args(["-l", "JavaScript", "-e", PICK_GGUF])
+        .kill_on_drop(true)
+        .output()
+        .await
+        .map_err(|error| llama_error(format!("无法打开模型选择窗口：{error}")))?;
+    if !output.status.success() {
+        return Err(llama_error(format!(
+            "模型选择窗口出错：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| llama_error(format!("无法读取所选模型的路径：{error}")))
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn choose_dev_model() -> Result<Option<String>, ApiErrorDto> {
+    Err(ApiErrorDto::new(
+        ApiErrorCode::Unavailable,
+        "模型文件选择器需要 macOS",
+        false,
+    ))
 }
 
 async fn snapshot(State(state): State<DevHttpState>) -> Json<CommandResponse<SnapshotDto>> {
@@ -649,6 +749,10 @@ mod tests {
             "schema_version = 1\nid = \"dev-http-test\"\ndisplay_name = \"Dev HTTP Test\"\n";
         let cases = [
             ("snapshot", json!({}), "ok"),
+            ("llama_inventory", json!({}), "ok"),
+            ("llama_releases", json!({ "page": 0 }), "error"),
+            ("llama_install", json!({ "tag": "../invalid" }), "error"),
+            ("llama_remove", json!({ "tag": "../invalid" }), "error"),
             (
                 "refresh",
                 json!({ "scope": { "scope": "all" }, "force": true }),

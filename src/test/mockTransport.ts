@@ -88,6 +88,11 @@ export function createMockTransport(
     listMcpServers: vi.fn(() => ok({ revision: "missing", servers: [] })),
     scanSkillImports: vi.fn(() => ok({ candidates: [], errors: [], checkedAt: "" })),
     scanMcpImports: vi.fn(() => ok({ candidates: [], errors: [] })),
+    llamaInventory: vi.fn(() => ok({ root: "/home/test/.llama-app", versions: [] })),
+    llamaReleases: vi.fn(() => ok({ releases: [], hasMore: false })),
+    llamaInstall: vi.fn(),
+    llamaRemove: vi.fn(() => ok(null)),
+    llamaChooseModel: vi.fn(() => ok(null)),
     codexUsage: vi.fn((request) =>
       ok({
         codexHome: "/home/test/.codex",

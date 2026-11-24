@@ -42,15 +42,6 @@ Checks use the public GitHub API without a token; API rate limits are shown as c
 failures. No update commands, downloads of release assets, or application changes are
 performed.
 
-For [llama.cpp](https://github.com/ggml-org/llama.cpp), copy
-[llama-cpp.toml](examples/providers/llama-cpp.toml) into the same `providers.d`
-directory and replace `command.executable` with the absolute path to your `llama`
-or `llama-cli` binary. `command.pattern` must have exactly one capture group and
-match once; `command.stream` selects `stdout` (default) or `stderr`. This example
-supports semantic-version output such as `0.7.0-dev`; older build-only output
-does not compare with semantic releases. Llama.app's own application version is
-separate and remains tracked by Homebrew when installed as the `llama-app` cask.
-
 For [oMLX](https://github.com/jundot/omlx), copy
 [omlx.toml](examples/providers/omlx.toml) into `providers.d`. The application is
 identified by `/Applications/oMLX.app` and bundle ID `app.omlx`.
@@ -61,6 +52,25 @@ by GitHub's `/releases/latest` endpoint (including oMLX release candidates).
 It does not switch to the full release history or nightly builds. Without this
 option, prerelease tags are rejected; draft releases are always rejected.
 These optional fields leave existing DashBeam configurations unchanged.
+
+## llama.cpp
+
+Open **llama.cpp → 下载版本** to browse releases or download a specific build
+by tag, such as `b12644`. DBox selects the official package for your Mac.
+Each build has its own directory under `~/.llama-app`, for example
+`~/.llama-app/llama-b12644`. DBox recognizes existing `llama-b<number>`
+directories containing `llama-server` and can remove each build individually.
+Llama.app owns the binaries and libraries directly under `~/.llama-app/`.
+
+Select an installed version, choose a GGUF model with the macOS file picker,
+and configure the host, port, API key and other server options. Copy the generated
+`llama-server` command and run it in your terminal. The page remembers the
+model and ordinary options. An API key stays in memory while the page is open
+and is included when you copy the command.
+
+The [optional GitHub Releases provider](examples/providers/llama-cpp.toml) can
+still check the semantic version of a separately installed CLI. Homebrew tracks
+the Llama.app application when installed as the `llama-app` cask.
 
 ## Codex usage
 

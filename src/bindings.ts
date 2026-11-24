@@ -37,6 +37,11 @@ export const commands = {
 	confirmExtensionOperation: (request: ConfirmExtensionRequest) => typedError<ExtensionStarted, ApiErrorDto>(__TAURI_INVOKE("confirm_extension_operation", { request })),
 	extensionOperationResult: (request: IdRequest) => typedError<ExtensionResult, ApiErrorDto>(__TAURI_INVOKE("extension_operation_result", { request })),
 	codexUsage: (request: CodexUsageRequest) => typedError<CodexUsageReport, ApiErrorDto>(__TAURI_INVOKE("codex_usage", { request })),
+	llamaInventory: () => typedError<LlamaInventory, ApiErrorDto>(__TAURI_INVOKE("llama_inventory")),
+	llamaReleases: (request: LlamaReleaseRequest) => typedError<LlamaReleasePage, ApiErrorDto>(__TAURI_INVOKE("llama_releases", { request })),
+	llamaInstall: (request: LlamaVersionRequest) => typedError<LlamaInstalledVersion, ApiErrorDto>(__TAURI_INVOKE("llama_install", { request })),
+	llamaRemove: (request: LlamaVersionRequest) => typedError<null, ApiErrorDto>(__TAURI_INVOKE("llama_remove", { request })),
+	llamaChooseModel: () => typedError<string | null, ApiErrorDto>(__TAURI_INVOKE("llama_choose_model")),
 };
 
 /** Events */
@@ -305,6 +310,36 @@ export type InstallationDto = {
 	executables: ExecutableDto[],
 	installedVersion: string | null,
 	hidden: boolean,
+};
+
+export type LlamaInstalledVersion = {
+	tag: string,
+	directory: string,
+	serverPath: string,
+};
+
+export type LlamaInventory = {
+	root: string,
+	versions: LlamaInstalledVersion[],
+};
+
+export type LlamaRelease = {
+	tag: string,
+	publishedAt: string,
+	assetName: string | null,
+};
+
+export type LlamaReleasePage = {
+	releases: LlamaRelease[],
+	hasMore: boolean,
+};
+
+export type LlamaReleaseRequest = {
+	page: number,
+};
+
+export type LlamaVersionRequest = {
+	tag: string,
 };
 
 export type LogRetentionDto = {

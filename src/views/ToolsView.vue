@@ -208,6 +208,9 @@
           <code>{{ installation.packageName }}</code>
           <p v-if="installation.providerId === 'mise'">{{ miseInstallationLabel(installation) }}</p>
           <p>{{ installation.installPath ?? "Provider 未返回安装路径" }}</p>
+          <RouterLink v-if="installation.id.startsWith('github-releases:llama-cpp:')" class="button secondary" to="/llama">
+            管理 llama.cpp 多版本
+          </RouterLink>
           <ul>
             <li v-for="executable in installation.executables" :key="executable.path">
               <span>{{ executable.name }}</span>

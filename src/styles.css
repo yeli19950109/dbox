@@ -1808,6 +1808,18 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 1050px) {
+  .topbar {
+    gap: 12px;
+  }
+
+  .topbar nav a {
+    padding-inline: 10px;
+  }
+
+  .connection-status > span:last-child {
+    display: none;
+  }
+
   .tools-layout {
     grid-template-columns: 180px minmax(0, 1fr);
     gap: 16px;

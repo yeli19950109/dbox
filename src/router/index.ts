@@ -6,12 +6,14 @@ import SettingsView from "../views/SettingsView.vue";
 import McpView from "../views/McpView.vue";
 import SkillsView from "../views/SkillsView.vue";
 import UsageView from "../views/UsageView.vue";
+import LlamaView from "../views/LlamaView.vue";
 
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: "/", redirect: "/tools" },
     { path: "/tools", name: "tools", component: ToolsView },
+    { path: "/llama", name: "llama", component: LlamaView },
     { path: "/runs", name: "runs", component: RunsView },
     { path: "/runs/confirm", name: "confirm", component: ConfirmView },
     { path: "/settings", name: "settings", component: SettingsView },
