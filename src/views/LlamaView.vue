@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useLlamaStore } from "../stores/llama";
 import { formatDate } from "../utils/presentation";
-import LlamaCommand from "../components/LlamaCommand.vue";
+import LlamaLaunchProfiles from "../components/LlamaLaunchProfiles.vue";
 
 const store = useLlamaStore();
 const tab = ref<"installed" | "releases">("installed");
@@ -128,7 +128,7 @@ onMounted(store.refresh);
             </template>
           </template>
         </section>
-        <LlamaCommand :version="store.selected" />
+        <LlamaLaunchProfiles :version="store.selected" />
       </div>
     </div>
   </div>

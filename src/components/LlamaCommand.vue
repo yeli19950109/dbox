@@ -1,22 +1,22 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { useLocalStorage } from "@vueuse/core";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { LlamaInstalledVersion } from "../bindings";
 import { errorMessage, getTransport, unwrapCommand } from "../api/transport";
 import { useLlamaApiKey } from "../stores/llamaApiKey";
+import type { LlamaLaunchProfile } from "../stores/llamaProfiles";
 
-const props = defineProps<{ version?: LlamaInstalledVersion }>();
-const config = useLocalStorage("dbox.llama.command", {
-  model: "", host: "127.0.0.1", port: "8080", context: "", threads: "", gpuLayers: "",
-}, { mergeDefaults: true, flush: "sync" });
+const props = defineProps<{ version?: LlamaInstalledVersion; profile: LlamaLaunchProfile; disabled: boolean }>();
+const config = computed(() => props.profile.config);
 const {
   key: apiKey, ready: keyReady, canSave: canSaveKey, readError: keyReadError,
   saveError: keySaveError, status: keyStatus, read: readKey, save: saveKey,
-} = useLlamaApiKey();
+} = useLlamaApiKey(props.profile.id);
 const reveal = ref(false);
 const choosing = ref(false);
 const pickerError = ref("");
 const copyStatus = ref("");
+let disposed = false;
+onBeforeUnmount(() => { disposed = true; });
 
 const numericOptions = [
   { key: "context", flag: "--ctx-size", label: "上下文长度", min: 0 },
@@ -63,12 +63,12 @@ const preview = computed(() => command(apiKey.value && !reveal.value ? "••�
 watch(fullCommand, () => { copyStatus.value = ""; });
 
 async function chooseModel() {
-  if (choosing.value) return;
+  if (choosing.value || props.disabled) return;
   choosing.value = true;
   pickerError.value = "";
   try {
     const path = await unwrapCommand(getTransport().commands.llamaChooseModel());
-    if (path) config.value.model = path;
+    if (path && !disposed && !props.disabled) config.value.model = path;
   } catch (reason) {
     pickerError.value = errorMessage(reason, "无法打开模型文件选择窗口。");
   } finally {
@@ -91,11 +91,8 @@ async function copyCommand() {
 </script>
 
 <template>
-  <section class="extension-panel command-panel" aria-labelledby="llama-config-title">
-    <header class="extension-heading">
-      <h2 id="llama-config-title">启动配置</h2>
-      <small class="muted">所有版本共用</small>
-    </header>
+  <fieldset class="extension-fieldset command-panel" :disabled="disabled">
+    <legend class="sr-only">{{ profile.name }} 的启动参数</legend>
     <div class="model-field" role="group" aria-labelledby="model-field-label">
       <span id="model-field-label">GGUF 模型</span>
       <div class="model-picker">
@@ -154,7 +151,7 @@ async function copyCommand() {
       </p>
       <p v-if="copyStatus" role="status">{{ copyStatus }}</p>
     </section>
-  </section>
+  </fieldset>
 </template>
 
 <style scoped>

@@ -42,8 +42,8 @@ export const commands = {
 	llamaInstall: (request: LlamaVersionRequest) => typedError<LlamaInstalledVersion, ApiErrorDto>(__TAURI_INVOKE("llama_install", { request })),
 	llamaRemove: (request: LlamaVersionRequest) => typedError<null, ApiErrorDto>(__TAURI_INVOKE("llama_remove", { request })),
 	llamaChooseModel: () => typedError<string | null, ApiErrorDto>(__TAURI_INVOKE("llama_choose_model")),
-	llamaReadApiKey: () => typedError<string | null, ApiErrorDto>(__TAURI_INVOKE("llama_read_api_key")),
-	llamaSaveApiKey: (value: string) => typedError<null, ApiErrorDto>(__TAURI_INVOKE("llama_save_api_key", { value })),
+	llamaReadApiKey: (profileId: string | null) => typedError<string | null, ApiErrorDto>(__TAURI_INVOKE("llama_read_api_key", { profileId })),
+	llamaSaveApiKey: (value: string, profileId: string | null) => typedError<null, ApiErrorDto>(__TAURI_INVOKE("llama_save_api_key", { value, profileId })),
 };
 
 /** Events */

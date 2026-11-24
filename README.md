@@ -62,14 +62,17 @@ Each build has its own directory under `~/.llama-app`, for example
 directories containing `llama-server` and can remove each build individually.
 Llama.app owns the binaries and libraries directly under `~/.llama-app/`.
 
-Select an installed version, choose a GGUF model with the macOS file picker,
-and configure the host, port, API key and other server options. Copy the generated
-`llama-server` command and run it in your terminal. All installed builds share
-the same launch settings. The model path, host, port and advanced options are
-saved automatically and restored when you reopen DBox. Click **保存密钥** to
-store or replace the API key in macOS Keychain. To remove it, empty the field
-and click **清除已保存密钥**. The preview masks the key by default, and the copied
-command includes its full value.
+Under **启动配置**, choose a saved profile or click **新建配置** to name a new one.
+Each profile remembers its GGUF model, host, port, context size, CPU threads and
+GPU layers. Edits save automatically. DBox reopens the last selected profile,
+and every profile can be used with any installed build. On upgrade, your
+previous launch settings and saved API key are available in **默认配置**.
+
+Select a build and a profile, then copy the generated `llama-server` command
+into your terminal. Click **保存密钥** to store or replace the selected profile's
+API key in macOS Keychain. The preview masks the key by default, and the copied
+command includes its full value. Renaming a profile keeps its key. Deleting a
+profile removes its saved key along with its parameters.
 
 In browser development mode, the key is stored in the browser origin's
 IndexedDB using Web Crypto. The desktop app uses its own Keychain entry.

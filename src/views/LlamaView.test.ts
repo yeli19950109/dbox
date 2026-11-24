@@ -13,6 +13,7 @@ function installed(tag: string) {
 const old = installed("b12644");
 const current = installed("b12645");
 const other = installed("b12646");
+const profilesStorage = "dbox.llama.profiles";
 function button(wrapper: VueWrapper, text: string) {
   const match = wrapper.findAll("button").find(item => item.text() === text);
   if (!match) throw new Error(`Button missing: ${text}`);
@@ -24,11 +25,38 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-async function render(overrides: Partial<ApiTransport["commands"]> = {}) {
+function fieldValue(wrapper: VueWrapper, selector: string) {
+  return (wrapper.get(selector).element as HTMLInputElement | HTMLSelectElement).value;
+}
+
+async function submitProfileName(wrapper: VueWrapper, name: string) {
+  const form = wrapper.findAll("form").find(item => item.find("#llama-profile-name").exists());
+  if (!form) throw new Error("Missing profile name form");
+  await form.get("#llama-profile-name").setValue(name);
+  await form.trigger("submit");
+  await flushPromises();
+}
+
+async function createProfile(wrapper: VueWrapper, name: string) {
+  await button(wrapper, "新建配置").trigger("click");
+  await submitProfileName(wrapper, name);
+  return fieldValue(wrapper, "#llama-profile");
+}
+
+async function selectProfile(wrapper: VueWrapper, id: string) {
+  await wrapper.get("#llama-profile").setValue(id);
+  await flushPromises();
+}
+
+async function render(overrides: Partial<ApiTransport["commands"]> = {}, legacyApiKey?: string) {
   const mock = createMockTransport({
     llamaInventory: vi.fn(() => ok({ root, versions: [current, old] })),
     ...overrides,
   });
+  if (legacyApiKey) {
+    await mock.transport.commands.llamaSaveApiKey(legacyApiKey, null);
+    vi.mocked(mock.transport.commands.llamaSaveApiKey).mockClear();
+  }
   setTransportForTests(mock.transport);
   const wrapper = mount(LlamaView);
   await flushPromises();
@@ -62,7 +90,9 @@ describe("llama.cpp", () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       `${old.serverPath} -m '/Models/Wei'\\''s $(name).gguf' --host 127.0.0.1 --port 12345 --api-key 'k '\\''$HOME' --ctx-size 4096 --n-gpu-layers 999`,
     );
-    expect(window.localStorage.getItem("dbox.llama.command")).not.toContain("$HOME");
+    const profiles = window.localStorage.getItem(profilesStorage);
+    expect(profiles).toContain(model);
+    expect(profiles).not.toContain("$HOME");
     await wrapper.get('input[inputmode="numeric"]').setValue("65536");
     expect(wrapper.find("pre").exists()).toBe(false);
     expect(button(wrapper, "复制命令").attributes("disabled")).toBeDefined();
@@ -102,17 +132,25 @@ describe("llama.cpp", () => {
     wrapper.unmount();
   });
 
-  it("restores the same saved model, options and key on switch and remount, and can clear the key", async () => {
+  it("migrates the legacy configuration and key into the default profile and restores it on remount", async () => {
     window.localStorage.setItem("dbox.llama.command", JSON.stringify({
       model: "/Models/existing.gguf", host: "localhost", port: "9310", context: "2048",
     }));
-    const { wrapper, commands } = await render();
+    const { wrapper, commands } = await render({}, "v031-key");
+    expect(fieldValue(wrapper, "#llama-profile")).toBe("default");
+    expect(wrapper.get('#llama-profile option[value="default"]').text()).toBe("默认配置");
+    expect(commands.llamaReadApiKey).toHaveBeenCalledWith("default");
+    expect(fieldValue(wrapper, "#llama-api-key")).toBe("v031-key");
+    await button(wrapper, "复制命令").trigger("click");
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
+      `${current.serverPath} -m /Models/existing.gguf --host localhost --port 9310 --api-key v031-key --ctx-size 2048`,
+    );
     expect(wrapper.text()).toContain("所有版本共用");
     const keyInput = wrapper.get("#llama-api-key");
     await keyInput.setValue("saved-key");
     await button(wrapper, "保存密钥").trigger("click");
     await flushPromises();
-    expect(commands.llamaSaveApiKey).toHaveBeenCalledWith("saved-key");
+    expect(commands.llamaSaveApiKey).toHaveBeenCalledWith("saved-key", "default");
     expect(wrapper.text()).toContain("密钥已保存。");
     await wrapper.get('input[aria-label="选择 b12644"]').setValue(true);
     expect(commands.llamaReadApiKey).toHaveBeenCalledTimes(1);
@@ -129,11 +167,14 @@ describe("llama.cpp", () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       `${old.serverPath} -m /Models/existing.gguf --host localhost --port 9310 --api-key saved-key --ctx-size 2048`,
     );
-    expect(window.localStorage.getItem("dbox.llama.command")).not.toContain("saved-key");
+    const profiles = window.localStorage.getItem(profilesStorage);
+    expect(profiles).toContain("/Models/existing.gguf");
+    expect(profiles).not.toContain("saved-key");
+    expect(profiles).not.toContain("v031-key");
     await reopened.get("#llama-api-key").setValue("");
     await button(reopened, "清除已保存密钥").trigger("click");
     await flushPromises();
-    expect(commands.llamaSaveApiKey).toHaveBeenLastCalledWith("");
+    expect(commands.llamaSaveApiKey).toHaveBeenLastCalledWith("", "default");
     expect(reopened.text()).toContain("已清除保存的密钥。");
     expect(reopened.get("pre").text()).not.toContain("--api-key");
     reopened.unmount();
@@ -142,6 +183,132 @@ describe("llama.cpp", () => {
     expect((cleared.get("#llama-api-key").element as HTMLInputElement).value).toBe("");
     expect(commands.llamaSaveApiKey).toHaveBeenCalledTimes(2);
     cleared.unmount();
+  });
+
+  it("keeps each profile's model, port and secret across renaming, version switches and remounts", async () => {
+    const { wrapper, commands } = await render({
+      llamaChooseModel: vi.fn().mockImplementationOnce(() => ok("/Models/A.gguf"))
+        .mockImplementationOnce(() => ok("/Models/B.gguf")),
+    });
+    await button(wrapper, "选择模型").trigger("click");
+    await flushPromises();
+    await wrapper.get('input[inputmode="numeric"]').setValue("9101");
+    await wrapper.get("#llama-api-key").setValue("secret-for-A");
+    await button(wrapper, "保存密钥").trigger("click");
+    await flushPromises();
+
+    const secondId = await createProfile(wrapper, "模型 B");
+    expect(secondId).toMatch(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i);
+    expect(commands.llamaReadApiKey).toHaveBeenLastCalledWith(secondId);
+    expect(fieldValue(wrapper, "#llama-api-key")).toBe("");
+    await button(wrapper, "选择模型").trigger("click");
+    await flushPromises();
+    await wrapper.get('input[inputmode="numeric"]').setValue("9102");
+    await wrapper.get("#llama-api-key").setValue("secret-for-B");
+    await button(wrapper, "保存密钥").trigger("click");
+    await flushPromises();
+    expect(commands.llamaSaveApiKey).toHaveBeenCalledWith("secret-for-A", "default");
+    expect(commands.llamaSaveApiKey).toHaveBeenCalledWith("secret-for-B", secondId);
+
+    await button(wrapper, "重命名").trigger("click");
+    await submitProfileName(wrapper, "本地聊天");
+    expect(fieldValue(wrapper, "#llama-profile")).toBe(secondId);
+    expect(wrapper.get(`#llama-profile option[value="${secondId}"]`).text()).toBe("本地聊天");
+    expect(commands.llamaSaveApiKey).toHaveBeenCalledTimes(2);
+    await selectProfile(wrapper, "default");
+    await button(wrapper, "复制命令").trigger("click");
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
+      `${current.serverPath} -m /Models/A.gguf --host 127.0.0.1 --port 9101 --api-key secret-for-A`,
+    );
+    await selectProfile(wrapper, secondId);
+    await wrapper.get('input[aria-label="选择 b12644"]').setValue(true);
+    await button(wrapper, "复制命令").trigger("click");
+    const commandB = `${old.serverPath} -m /Models/B.gguf --host 127.0.0.1 --port 9102 --api-key secret-for-B`;
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(commandB);
+    const profiles = window.localStorage.getItem(profilesStorage);
+    expect(profiles).toContain("本地聊天");
+    expect(profiles).not.toContain("secret-for-A");
+    expect(profiles).not.toContain("secret-for-B");
+    wrapper.unmount();
+
+    setActivePinia(createPinia());
+    const reopened = mount(LlamaView);
+    await flushPromises();
+    expect(fieldValue(reopened, "#llama-profile")).toBe(secondId);
+    expect(fieldValue(reopened, "#llama-api-key")).toBe("secret-for-B");
+    expect(reopened.get("pre").text()).not.toContain("secret-for-B");
+    await button(reopened, "复制命令").trigger("click");
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(commandB);
+    reopened.unmount();
+  });
+
+  it("confirms deletion, retains the profile when secret cleanup fails and allows a successful retry", async () => {
+    const { wrapper, commands } = await render({}, "default-key");
+    const secondId = await createProfile(wrapper, "临时服务");
+    await wrapper.get("#llama-api-key").setValue("temporary-key");
+    await button(wrapper, "保存密钥").trigger("click");
+    await flushPromises();
+    await button(wrapper, "删除配置").trigger("click");
+    await button(wrapper, "取消").trigger("click");
+    expect(commands.llamaSaveApiKey).toHaveBeenCalledTimes(1);
+    expect(fieldValue(wrapper, "#llama-profile")).toBe(secondId);
+
+    vi.mocked(commands.llamaSaveApiKey).mockImplementationOnce(() => apiError("unavailable", "凭据清理失败"));
+    await button(wrapper, "删除配置").trigger("click");
+    await button(wrapper, "确认删除").trigger("click");
+    await flushPromises();
+    expect(commands.llamaSaveApiKey).toHaveBeenLastCalledWith("", secondId);
+    expect(fieldValue(wrapper, "#llama-profile")).toBe(secondId);
+    expect(window.localStorage.getItem(profilesStorage)).toContain("临时服务");
+    expect(wrapper.text()).toContain("凭据清理失败");
+
+    await button(wrapper, "确认删除").trigger("click");
+    await flushPromises();
+    expect(commands.llamaSaveApiKey).toHaveBeenLastCalledWith("", secondId);
+    expect(window.localStorage.getItem(profilesStorage)).not.toContain(secondId);
+    expect(fieldValue(wrapper, "#llama-profile")).toBe("default");
+    expect(fieldValue(wrapper, "#llama-api-key")).toBe("default-key");
+    wrapper.unmount();
+    setActivePinia(createPinia());
+    const reopened = mount(LlamaView);
+    await flushPromises();
+    expect(reopened.findAll("#llama-profile option")).toHaveLength(1);
+    expect(fieldValue(reopened, "#llama-api-key")).toBe("default-key");
+    reopened.unmount();
+  });
+
+  it("keeps late key and model-picker results from replacing the newly selected profile's values", async () => {
+    const pendingKey = deferred<Awaited<ReturnType<typeof ok<string | null>>>>();
+    const pendingModel = deferred<Awaited<ReturnType<typeof ok<string | null>>>>();
+    const { wrapper, commands } = await render({
+      llamaChooseModel: vi.fn().mockImplementationOnce(() => ok("/Models/second.gguf"))
+        .mockReturnValueOnce(pendingModel.promise),
+    });
+    const secondId = await createProfile(wrapper, "第二套");
+    await button(wrapper, "选择模型").trigger("click");
+    await flushPromises();
+    await wrapper.get("#llama-api-key").setValue("second-secret");
+    await button(wrapper, "保存密钥").trigger("click");
+    await flushPromises();
+
+    vi.mocked(commands.llamaReadApiKey).mockReturnValueOnce(pendingKey.promise);
+    await selectProfile(wrapper, "default");
+    await button(wrapper, "选择模型").trigger("click");
+    await selectProfile(wrapper, secondId);
+    expect(commands.llamaReadApiKey).toHaveBeenLastCalledWith(secondId);
+    expect(fieldValue(wrapper, "#llama-api-key")).toBe("second-secret");
+
+    pendingKey.resolve({ status: "ok", data: "first-secret" });
+    pendingModel.resolve({ status: "ok", data: "/Models/first.gguf" });
+    await flushPromises();
+    expect(fieldValue(wrapper, "#llama-api-key")).toBe("second-secret");
+    expect(wrapper.get("pre").text()).toContain("/Models/second.gguf");
+    expect(wrapper.get("pre").text()).not.toContain("/Models/first.gguf");
+    await button(wrapper, "复制命令").trigger("click");
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
+      `${current.serverPath} -m /Models/second.gguf --host 127.0.0.1 --port 8080 --api-key second-secret`,
+    );
+    wrapper.unmount();
   });
 
   it("preserves edits on a late read and waits for a pending rotation when returning to the page", async () => {

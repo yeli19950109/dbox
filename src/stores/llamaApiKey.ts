@@ -1,10 +1,32 @@
 import { computed, onMounted, ref } from "vue";
 import { errorMessage, getTransport, unwrapCommand } from "../api/transport";
 
-// A newly mounted page must see any save started before navigating away.
-let lastWrite: Promise<void> = Promise.resolve();
+// Reopening a profile or deleting its credential must wait for an in-flight save.
+const pendingWrites = new Map<string, Promise<void>>();
 
-export function useLlamaApiKey() {
+async function waitForWrite(profileId: string) {
+  // A failed write is reported to its caller. The next request can read or retry.
+  await pendingWrites.get(profileId)?.catch(() => {});
+}
+
+async function writeKey(profileId: string, value: string) {
+  const commands = getTransport().commands;
+  const write = waitForWrite(profileId).then(async () => {
+    await unwrapCommand(commands.llamaSaveApiKey(value, profileId));
+  });
+  pendingWrites.set(profileId, write);
+  try {
+    await write;
+  } finally {
+    if (pendingWrites.get(profileId) === write) pendingWrites.delete(profileId);
+  }
+}
+
+export function clearLlamaProfileApiKey(profileId: string) {
+  return writeKey(profileId, "");
+}
+
+export function useLlamaApiKey(profileId: string) {
   const saved = ref<string>();
   const draft = ref("");
   const edited = ref(false);
@@ -40,8 +62,8 @@ export function useLlamaApiKey() {
     reading.value = true;
     readError.value = "";
     try {
-      await lastWrite;
-      saved.value = (await unwrapCommand(getTransport().commands.llamaReadApiKey())) ?? "";
+      await waitForWrite(profileId);
+      saved.value = (await unwrapCommand(getTransport().commands.llamaReadApiKey(profileId))) ?? "";
       if (!edited.value) draft.value = saved.value;
     } catch (reason) {
       readError.value = errorMessage(reason, "无法读取已保存的密钥。");
@@ -53,13 +75,10 @@ export function useLlamaApiKey() {
   async function save() {
     if (!canSave.value) return;
     const value = draft.value;
-    const commands = getTransport().commands;
     saving.value = true;
     saveError.value = "";
-    const write = lastWrite.then(() => unwrapCommand(commands.llamaSaveApiKey(value)));
-    lastWrite = write.then(() => {}, () => {});
     try {
-      await write;
+      await writeKey(profileId, value);
       saved.value = value;
       savedHere.value = true;
       readError.value = "";

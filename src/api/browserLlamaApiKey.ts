@@ -2,7 +2,13 @@ import { createStore, del, get, set } from "idb-keyval";
 
 // Keep Dev HTTP credentials in this browser's origin. Only the native app uses Keychain.
 const store = createStore("dbox-dev-credentials", "credentials");
-const entry = "llama-server";
+function entryForProfile(profileId: string | null): string {
+  if (profileId == null || profileId === "default") return "llama-server";
+  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(profileId)) {
+    throw new Error("无效的配置 ID");
+  }
+  return `llama-server/${profileId.toLowerCase()}`;
+}
 
 interface EncryptedKey {
   key: CryptoKey;
@@ -10,8 +16,8 @@ interface EncryptedKey {
   ciphertext: ArrayBuffer;
 }
 
-export async function readBrowserLlamaApiKey(): Promise<string | null> {
-  const saved = await get<EncryptedKey>(entry, store);
+export async function readBrowserLlamaApiKey(profileId: string | null = null): Promise<string | null> {
+  const saved = await get<EncryptedKey>(entryForProfile(profileId), store);
   if (!saved) return null;
   const data = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: saved.iv }, saved.key, saved.ciphertext,
@@ -19,7 +25,8 @@ export async function readBrowserLlamaApiKey(): Promise<string | null> {
   return new TextDecoder().decode(data);
 }
 
-export async function saveBrowserLlamaApiKey(value: string): Promise<null> {
+export async function saveBrowserLlamaApiKey(value: string, profileId: string | null = null): Promise<null> {
+  const entry = entryForProfile(profileId);
   if (value === "") {
     await del(entry, store);
   } else {

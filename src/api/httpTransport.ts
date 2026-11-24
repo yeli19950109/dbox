@@ -284,13 +284,13 @@ const httpCommands = {
   llamaRemove: (request: Parameters<typeof generatedCommands.llamaRemove>[0]) =>
     command<null>("llama_remove", request),
   llamaChooseModel: () => command<string | null>("llama_choose_model"),
-  llamaReadApiKey: async () => {
+  llamaReadApiKey: async (profileId: string | null) => {
     const { readBrowserLlamaApiKey } = await import("./browserLlamaApiKey");
-    return { status: "ok" as const, data: await readBrowserLlamaApiKey() };
+    return { status: "ok" as const, data: await readBrowserLlamaApiKey(profileId) };
   },
-  llamaSaveApiKey: async (value: string) => {
+  llamaSaveApiKey: async (value: string, profileId: string | null) => {
     const { saveBrowserLlamaApiKey } = await import("./browserLlamaApiKey");
-    return { status: "ok" as const, data: await saveBrowserLlamaApiKey(value) };
+    return { status: "ok" as const, data: await saveBrowserLlamaApiKey(value, profileId) };
   },
 } satisfies typeof generatedCommands;
 

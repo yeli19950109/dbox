@@ -58,7 +58,7 @@ export function createMockTransport(
   }
 
   const snapshot = snapshotWithTools();
-  let llamaApiKey: string | null = null;
+  const llamaApiKeys = new Map<string, string>();
   const baseCommands = {
     snapshot: vi.fn(() => ok(snapshot)),
     refresh: vi.fn(() => ok(snapshot)),
@@ -94,9 +94,11 @@ export function createMockTransport(
     llamaInstall: vi.fn(),
     llamaRemove: vi.fn(() => ok(null)),
     llamaChooseModel: vi.fn(() => ok(null)),
-    llamaReadApiKey: vi.fn(() => ok(llamaApiKey)),
-    llamaSaveApiKey: vi.fn((value: string) => {
-      llamaApiKey = value || null;
+    llamaReadApiKey: vi.fn((profileId: string | null) => ok(llamaApiKeys.get(profileId?.toLowerCase() ?? "default") ?? null)),
+    llamaSaveApiKey: vi.fn((value: string, profileId: string | null) => {
+      const id = profileId?.toLowerCase() ?? "default";
+      if (value) llamaApiKeys.set(id, value);
+      else llamaApiKeys.delete(id);
       return ok(null);
     }),
     codexUsage: vi.fn((request) =>
